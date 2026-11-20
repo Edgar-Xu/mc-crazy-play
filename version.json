@@ -1,0 +1,9 @@
+{
+ "v": "2.1.2",
+ "apk": "https://github.com/Edgar-Xu/mc-crazy-play/releases/download/v2.1.2/MC-Crazy-2.1.2.apk",
+ "size": "4.2 MB",
+ "notes": [
+  "安卓版加入更新提示：启动时发现新版本会弹窗，点「下载更新」后覆盖安装即可，存档保留",
+  "发布流程：新版 APK 自动上传到 GitHub Releases"
+ ]
+}
