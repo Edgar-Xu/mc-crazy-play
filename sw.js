@@ -1,7 +1,7 @@
 /* MC Crazy service worker: the app shell is cached at install so the phone, duel (vs AI), redstone labs and
    arcade work offline. Same-origin requests: cache first, refreshed in the background. Google Fonts:
    stale-while-revalidate. Old caches are removed when a new build activates. */
-var CACHE = 'mccrazy-2.0.0-13ee7384e3';
+var CACHE = 'mccrazy-2.0.1-ee0fcb40a7';
 var SHELL = ['./', 'index.html', 'duel.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', function (e) { e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); })); });
 self.addEventListener('activate', function (e) {

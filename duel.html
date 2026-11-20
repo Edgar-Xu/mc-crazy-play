@@ -39,9 +39,12 @@ box-shadow:inset -3px -4px 0 rgba(0,0,0,.35),inset 3px 3px 0 rgba(255,255,255,.2
 background:linear-gradient(#7ec8f0 0,#a9dcf5 36%,transparent 36%),linear-gradient(transparent 36%,var(--grass) 36%,var(--grass2) 40%,transparent 40%)}
 .logo{font-size:52px;color:#fff;text-shadow:0 4px 0 #3b2a17,0 0 18px rgba(0,0,0,.25);margin-top:6px}
 .sub{color:#284a14;font-weight:700;margin-top:-6px}
-.fan{position:relative;height:200px;width:260px;margin:8px 0 4px}
+.fan{position:relative;height:200px;width:260px;margin:8px 0 4px;flex:none}
 .fan .cd{position:absolute;left:50%;top:10px;transform-origin:50% 120%;width:96px;height:134px}
+#menu>*{flex:none}
 .mbtns{display:grid;gap:10px;width:min(320px,100%)}
+@media (max-height:720px){#menu{padding-top:14px;gap:10px}.logo{font-size:42px}.fan{height:150px;margin:0}.mbtns .btn{min-height:42px;padding:8px 14px}}
+@media (max-height:600px){.fan{height:112px}}
 .rec{color:var(--mute);font-size:13px}
 /* cards */
 .cd{position:relative;width:70px;height:98px;border-radius:4px;padding:3px;display:flex;flex-direction:column;background:var(--nm);
@@ -122,8 +125,9 @@ background:linear-gradient(115deg,transparent 20%,rgba(255,90,200,.55) 35%,rgba(
 .mid .ph b{display:block;font-size:15px}
 .hint{flex:none;font-size:12px;color:var(--mute);text-align:center;height:18px;line-height:18px;white-space:nowrap;overflow:hidden}
 .hand{height:118px;flex:none;display:flex;align-items:flex-end;justify-content:center;padding:0 8px 8px;gap:4px}
-.hand .cd{width:74px;height:104px;transition:transform .15s}
-.hand.tight .cd{margin-left:-22px}.hand.tight .cd:first-child{margin-left:0}
+.hand .cd{width:var(--hw,74px);height:calc(var(--hw,74px) * 1.4);transition:transform .15s}
+.hand .cd+.cd{margin-left:var(--ov,0px)}
+.hand{gap:var(--hg,4px)}
 .atkbar{position:absolute;left:8px;right:8px;display:none;gap:8px;align-items:center;background:rgba(20,10,4,.92);padding:6px 10px;border:2px solid var(--red);border-radius:4px;z-index:4}
 .atkbar.on{display:flex}.atkbar span{flex:1;font-size:13px}
 /* sheet & overlays */
@@ -184,7 +188,7 @@ input.tx{font:16px system-ui;padding:10px 12px;border-radius:4px;border:2px soli
 .dp.pop{animation:dpop .3s ease-out}
 @keyframes dpop{from{transform:rotate(-90deg) scale(1.5);opacity:0}}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01s!important;transition:none!important}.cd.r3::after{animation:none}#game[data-field=mon]{animation:none}}
-@media (max-height:660px){.row.m{min-height:84px}.slot{height:86px}.row.m .cd{width:62px;height:86px}.row.t{min-height:54px}.row.t .slot{height:56px}.hand{height:104px}.hand .cd{width:66px;height:92px}}
+@media (max-height:660px){.row.m{min-height:84px}.slot{height:86px}.row.m .cd{width:62px;height:86px}.row.t{min-height:54px}.row.t .slot{height:56px}.hand{height:104px}.hand .cd{width:min(var(--hw,74px),66px);height:calc(min(var(--hw,74px),66px) * 1.4)}}
 </style>
 </head>
 <body>
@@ -303,7 +307,7 @@ input.tx{font:16px system-ui;padding:10px 12px;border-radius:4px;border:2px soli
   <div id="over"></div>
   <div id="toast"></div>
 </div>
-<script>window.MC_APP={v:"2.0.0"};</script>
+<script>window.MC_APP={v:"2.0.1"};</script>
 <script>
 ﻿/* Block Duel engine: deterministic, serialisable state; all randomness from G.rs.
    Card behaviour lives on the card definitions as hooks. Effects that may be interrupted
@@ -2085,7 +2089,9 @@ document.addEventListener('click', function (e) {
 function drawMenu() {
   var ids = ['zom', 'obd', 'igd'];
   $('#fan').innerHTML = ids.map(function (id, i) { return cardHTML(id, { size: 'big' }); }).join('');
-  $('#fan').querySelectorAll('.cd').forEach(function (c, i) { c.style.width = '110px'; c.style.height = '152px'; c.style.transform = 'translateX(-50%) rotate(' + ((i - 1) * 14) + 'deg)'; c.style.zIndex = i === 1 ? 2 : 1; });
+  /* card size follows the fan height, so short screens (the phone shell, landscape) never overlap the buttons */
+  var fh = $('#fan').getBoundingClientRect().height || 200, ch = Math.round(Math.min(152, fh * 0.72)), cw = Math.round(ch * 110 / 152);
+  $('#fan').querySelectorAll('.cd').forEach(function (c, i) { c.style.width = cw + 'px'; c.style.height = ch + 'px'; c.style.top = Math.round(fh * 0.05) + 'px'; c.style.transform = 'translateX(-50%) rotate(' + ((i - 1) * 14) + 'deg)'; c.style.zIndex = i === 1 ? 2 : 1; });
   var r = store.get('rec', { w: 0, l: 0 });
   $('#rec').textContent = r.w + r.l ? '战绩 ' + r.w + ' 胜 ' + r.l + ' 负' : '';
 }
@@ -2266,7 +2272,10 @@ function render() {
   $('#mmz').innerHTML = [0, 1, 2].map(function (z) { return monHTML(me, z, L); }).join('');
   $('#msz').innerHTML = spellRow(me, L);
   var H = G.P[me].hand;
-  $('#hand').className = 'hand' + (H.length > 5 ? ' tight' : '');
+  /* hand cards fit the width: shrink to 56px, then overlap */
+  var hEl = $('#hand'), avail = Math.max(200, hEl.clientWidth - 16), n = Math.max(1, H.length), hw = Math.min(74, Math.floor((avail - (n - 1) * 4) / n)), ov = 0;
+  if (hw < 56) { hw = 56; ov = Math.ceil((n * 56 - avail) / Math.max(1, n - 1)); }
+  hEl.className = 'hand'; hEl.style.setProperty('--hw', hw + 'px'); hEl.style.setProperty('--ov', (ov ? -ov : 0) + 'px'); hEl.style.setProperty('--hg', ov ? '0px' : '4px');
   $('#hand').innerHTML = ST.mode === 'spec' ? H.map(function () { return backHTML({}); }).join('') :
     H.map(function (c, h) { var can = L.some(function (a) { return a.h === h && HAND_T[a.t]; }); return cardHTML(c.id, { k: 'hand:' + h, cls: can ? 'can' : '' }); }).join('');
   $('#game').dataset.field = G.P[me].fz ? G.P[me].fz.c.id : (G.P[op].fz ? G.P[op].fz.c.id : '');
@@ -2842,6 +2851,7 @@ $('#onBack').onclick = function () { if (NET.dr && !(ST.G && ST.G.winner < 0)) n
 window.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSheet(); ST.sel = -1; render(); } if (e.key === 'Enter' && e.target.matches && e.target.matches('.cd[role=button]')) e.target.click(); });
 FX.init($('#app'));
 drawMenu();
+window.addEventListener('resize', function () { if ($('#menu').classList.contains('on')) drawMenu(); if (ST.G && $('#game').classList.contains('on')) render(); });
 window.__bd = { ST: ST, NET: NET, render: render, myAct: myAct, startGame: startGame, startTut: startTut, startReplay: startReplay, store: store };
 }
 
