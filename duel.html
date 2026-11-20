@@ -194,6 +194,7 @@ input.tx{font:16px system-ui;padding:10px 12px;border-radius:4px;border:2px soli
 <body>
 <div id="app">
   <section id="menu" class="scr on">
+    <button class="btn s" id="mus" style="position:absolute;right:10px;top:10px;flex:none" aria-label="音乐开关">音乐 开</button>
     <div class="logo ti">方块决斗</div>
     <div class="sub">方块世界 · 怪兽 魔法 陷阱</div>
     <div class="fan" id="fan"></div>
@@ -307,7 +308,7 @@ input.tx{font:16px system-ui;padding:10px 12px;border-radius:4px;border:2px soli
   <div id="over"></div>
   <div id="toast"></div>
 </div>
-<script>window.MC_APP={v:"2.0.1"};</script>
+<script>window.MC_APP={v:"2.1.0"};</script>
 <script>
 ﻿/* Block Duel engine: deterministic, serialisable state; all randomness from G.rs.
    Card behaviour lives on the card definitions as hooks. Effects that may be interrupted
@@ -1987,6 +1988,205 @@ var NETX = (function () {
 
 </script>
 <script>
+/* MC Crazy music: a small procedural tracker on Web Audio. All tracks are original compositions written for
+   this project in a block-world mood (sparse piano, soft pads, a "choir" pad for dungeons, chip drums for
+   combat). No recordings are used.
+
+   Notation per part: whitespace-separated tokens, one per 16th step.
+     '.' rest   '-' hold previous note   'n' scale degree (0 = root; negatives and >7 move octaves)
+     'a+b+c' chord   drums: a string of 'x' (hit) and '.' (rest), one char per step.
+   Layers: a part with L = 1 only plays when intensity >= .5 (adaptive layering), L = 2 when >= .85. */
+var MUSIC = (function () {
+  var SC = { maj: [0, 2, 4, 5, 7, 9, 11], min: [0, 2, 3, 5, 7, 8, 10], dor: [0, 2, 3, 5, 7, 9, 10], lyd: [0, 2, 4, 6, 7, 9, 11],
+    phr: [0, 1, 3, 5, 7, 8, 10], hmin: [0, 2, 3, 5, 7, 8, 11], mix: [0, 2, 4, 5, 7, 9, 10], pent: [0, 2, 4, 7, 9] };
+  /* ---------- tracks (original) ---------- */
+  var T = {
+    /* duel menu, tutorial: calm, lydian piano over slow pads */
+    menu: { bpm: 70, root: 60, sc: 'lyd', parts: [
+      { i: 'pad', o: -1, v: .5, p: '0+2+4 - - - - - - - - - - - - - - - 5+7+9 - - - - - - - - - - - - - - - 3+5+7 - - - - - - - - - - - - - - - 4+6+8 - - - - - - - - - - - - - - -' },
+      { i: 'piano', o: 0, v: .55, p: '4 . . 7 . . 9 . 8 . . . 7 . . . 9 . . 11 . . 12 . 11 . 9 . . . . . 7 . . 9 . . 8 . 7 . . . 4 . . . 6 . . 8 . . 9 . 8 . . . . . . .' },
+      { i: 'piano', o: -1, v: .35, p: '0 . . . 4 . . . 7 . . . 4 . . . 5 . . . 9 . . . 12 . . . 9 . . . 3 . . . 7 . . . 10 . . . 7 . . . 4 . . . 8 . . . 11 . . . 8 . . .' } ] },
+    /* duel: dorian groove; drums join with intensity */
+    duel: { bpm: 104, root: 62, sc: 'dor', parts: [
+      { i: 'bass', o: -2, v: .6, p: '0 . 0 . 7 . 0 . 3 . . 3 4 . 2 . 0 . 0 . 7 . 0 . 5 . . 5 4 . 3 . -2 . -2 . 5 . -2 . 0 . . 0 2 . 4 . -3 . -3 . 4 . -3 . -1 . 1 . 2 . 4 .' },
+      { i: 'pad', o: -1, v: .35, p: '0+2+4 - - - - - - - - - - - - - - - 0+2+4 - - - - - - - - - - - - - - - -2+0+2 - - - - - - - - - - - - - - - -3+-1+1 - - - - - - - - - - - - - - -' },
+      { i: 'lead', o: 0, v: .3, L: 1, p: '7 . 9 . 10 - 9 . 7 . 4 . 5 - 7 . 9 . 7 . 4 . 2 . 4 - - . . . . . 5 . 7 . 9 - 7 . 5 . 4 . 2 . 0 . 2 . 4 . 2 . 1 - - . . . . .' },
+      { i: 'kick', L: 1, v: .7, p: 'x.......x.......x.......x.......x.......x.......x.......x.x.....' },
+      { i: 'snare', L: 1, v: .45, p: '....x.......x.......x.......x.......x.......x.......x.......x.xx' },
+      { i: 'hat', L: 1, v: .25, p: 'x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.' },
+      { i: 'hat', L: 2, v: .2, p: '.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x' } ] },
+    /* trial chambers: phrygian, copper bells and choir */
+    trial: { bpm: 96, root: 64, sc: 'phr', parts: [
+      { i: 'choir', o: -1, v: .4, p: '0+2+4 - - - - - - - - - - - - - - - 1+3+5 - - - - - - - - - - - - - - - 0+2+4 - - - - - - - - - - - - - - - -1+1+3 - - - - - - - - - - - - - - -' },
+      { i: 'bell', o: 1, v: .3, p: '0 . . 4 . . 7 . 8 . 7 . 4 . . . 1 . . 5 . . 8 . 9 . 8 . 5 . . . 0 . . 4 . . 7 . 11 . 10 . 8 . 7 . 6 . 4 . 3 . 1 . 0 . . . . . . .' },
+      { i: 'bass', o: -2, v: .5, p: '0 . . . 0 . . . 0 . . 0 . . 1 . 1 . . . 1 . . . 1 . . 1 . . 0 . 0 . . . 0 . . . 0 . . 0 . . -1 . -1 . . . -1 . . . -1 . 0 . 1 . -1 .' },
+      { i: 'kick', L: 1, v: .65, p: 'x.....x...x.....x.....x...x.....x.....x...x.....x.....x...x.x...' },
+      { i: 'snare', L: 1, v: .4, p: '........x...............x...............x...............x...x.x.' } ] },
+    /* ocean temple: slow, watery lydian */
+    ocean: { bpm: 62, root: 65, sc: 'lyd', parts: [
+      { i: 'pad', o: -1, v: .5, p: '0+4+9 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 3+7+12 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -' },
+      { i: 'piano', o: 0, v: .4, p: '. . 7 . 11 . 14 . . . 11 . 9 . . . . . 7 . 9 . 11 . 13 . . . 11 . . . . . 8 . 10 . 12 . . . 10 . 8 . . . . . 6 . 8 . 10 . 9 . . . . . . .' } ] },
+    /* nether fortress: dark drone */
+    nether: { bpm: 84, root: 47, sc: 'hmin', parts: [
+      { i: 'bass', o: -1, v: .6, p: '0 - - - . . 0 . 1 - - - . . 0 . 0 - - - . . 0 . -1 - - - . . -2 . 0 - - - . . 0 . 1 - - - . . 3 . 2 - - - . . 1 . 0 - - - . . . .' },
+      { i: 'choir', o: 0, v: .3, p: '0+2+4 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 1+3+6 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -' },
+      { i: 'kick', L: 1, v: .6, p: 'x.......x.......x.......x.......x.......x.......x.......x...x...' } ] },
+    /* village: cheerful major */
+    village: { bpm: 112, root: 67, sc: 'maj', parts: [
+      { i: 'bass', o: -2, v: .5, p: '0 . 4 . 0 . 4 . 3 . 7 . 3 . 7 . 4 . 8 . 4 . 8 . 0 . 4 . 0 . 4 . 5 . 9 . 5 . 9 . 3 . 7 . 3 . 7 . 4 . 8 . 4 . 8 . 0 . 4 . 7 . 4 .' },
+      { i: 'piano', o: 0, v: .45, p: '4 . 5 . 7 . 4 . 3 . 5 . 7 . 9 . 8 . 7 . 6 . 4 . 7 . . . . . 5 . 7 . 9 . 7 . 5 . 7 . 9 . 10 . 11 . 10 . 9 . 8 . 7 . . . . . . .' },
+      { i: 'hat', L: 1, v: .2, p: 'x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...' } ] },
+    /* ancient city: almost nothing, deep */
+    sculk: { bpm: 54, root: 38, sc: 'min', parts: [
+      { i: 'pad', o: 0, v: .55, p: '0+4 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -1+3 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -' },
+      { i: 'bell', o: 2, v: .12, p: '. . . . . . . . 4 . . . . . . . . . . . . . . . . . . . . . 3 . . . . . . . . . . . . . . . . . . . . . . . 7 . . . . . . . . . . .' } ] },
+    /* raid: march, minor, horn lead */
+    raid: { bpm: 120, root: 57, sc: 'min', parts: [
+      { i: 'bass', o: -1, v: .55, p: '0 . 0 0 0 . 0 0 -2 . -2 -2 -2 . -2 -2 -3 . -3 -3 -3 . -3 -3 -1 . -1 -1 -1 . -1 -1 0 . 0 0 0 . 0 0 -2 . -2 -2 -2 . -2 -2 -3 . -3 -3 -1 . -1 -1 0 . . . . . . .' },
+      { i: 'lead', o: 0, v: .32, p: '7 - - 5 4 - 2 - 0 - - - . . . . 5 - - 4 2 - 0 - -1 - - - . . . . 7 - - 9 10 - 9 - 7 - 5 - 4 - 2 - 4 - - - 2 - 1 - 0 - - - . . . .' },
+      { i: 'kick', v: .7, p: 'x...x...x...x...x...x...x...x...x...x...x...x...x...x...x.x.x.x.' },
+      { i: 'snare', v: .45, p: '..x...x...x.x...' + '..x...x...x.x...' + '..x...x...x.x...' + '..x...x.x.x.xxxx' } ] },
+    /* boss: fast harmonic minor */
+    boss: { bpm: 140, root: 52, sc: 'hmin', parts: [
+      { i: 'bass', o: -1, v: .6, p: '0 0 7 0 0 7 0 6 0 0 7 0 5 4 3 2 -1 -1 6 -1 -1 6 -1 5 0 0 7 0 4 . 6 .' + ' 0 0 7 0 0 7 0 6 0 0 7 0 5 4 3 2 1 1 8 1 1 8 1 7 -1 -1 6 -1 . 6 . 4' },
+      { i: 'lead', o: 0, v: .3, p: '7 - 8 - 7 - 6 - 4 - - - 2 - 3 - 4 - 6 - 7 - 8 - 6 - - - . . . . 7 - 9 - 10 - 9 - 7 - 8 - 6 - 4 - 3 - 4 - 6 - 7 - - - - - . .' },
+      { i: 'choir', o: -1, v: .25, L: 1, p: '0+2+4 - - - - - - - - - - - - - - - -1+1+3 - - - - - - - - - - - - - - - 0+2+4 - - - - - - - - - - - - - - - 1+3+5 - - - - - - - - - - - - - - -' },
+      { i: 'kick', v: .75, p: 'x...x...x...x...x...x...x...x...x...x...x...x...x...x...xxx.x.x.' },
+      { i: 'snare', v: .45, p: '....x.......x.......x.......x.......x.......x.......x.....x.x.xx' },
+      { i: 'hat', v: .22, p: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' } ] },
+    /* arcade */
+    pigDay: { bpm: 118, root: 67, sc: 'maj', parts: [
+      { i: 'bass', o: -2, v: .5, p: '0 . . 0 . . 4 . 3 . . 3 . . 2 . 0 . . 0 . . 4 . 5 . . 4 . . 3 .' },
+      { i: 'lead', o: 0, v: .25, p: '4 . 5 . 7 . . 9 . 7 . 5 . 4 . . 2 . 4 . 5 . . 7 . . . . . . . .' },
+      { i: 'hat', v: .18, p: 'x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.' } ] },
+    pigNight: { bpm: 96, root: 63, sc: 'lyd', parts: [
+      { i: 'pad', o: -1, v: .45, p: '0+2+4 - - - - - - - - - - - - - - - 3+5+7 - - - - - - - - - - - - - - -' },
+      { i: 'piano', o: 0, v: .35, p: '4 . . 6 . . 7 . . . 9 . . . . . 7 . . 6 . . 4 . . . 2 . . . . .' } ] },
+    mine: { bpm: 110, root: 60, sc: 'min', parts: [
+      { i: 'bass', o: -2, v: .6, p: '0 . 0 7 . 0 6 . 0 . 0 7 . 5 3 . 0 . 0 7 . 0 6 . -2 . -2 5 . 3 2 .' },
+      { i: 'bell', o: 1, v: .2, p: '. . 4 . . . 2 . . . 4 . 6 . 4 . . . 4 . . . 2 . . . 0 . . . . .' },
+      { i: 'kick', v: .6, p: 'x.....x...x.....x.....x...x.....' },
+      { i: 'hat', v: .2, p: '..x...x...x...x...x...x...x...x.' } ] },
+    cave: { bpm: 100, root: 57, sc: 'dor', parts: [
+      { i: 'piano', o: 0, v: .35, p: '0 4 7 9 7 4 0 4 2 5 9 11 9 5 2 5 3 7 10 12 10 7 3 7 1 4 8 10 8 4 1 4' },
+      { i: 'bass', o: -2, v: .55, p: '0 . . . . . . . 2 . . . . . . . 3 . . . . . . . 1 . . . . . . .' },
+      { i: 'kick', L: 1, v: .55, p: 'x.......x.......x.......x...x...' } ] },
+    blocks: { bpm: 132, root: 64, sc: 'min', parts: [
+      { i: 'lead', o: 0, v: .25, p: '7 . 4 5 7 . 5 4 2 . 2 4 7 . 5 4 3 . . 4 5 . 7 . 4 . 2 . 2 . . .' },
+      { i: 'bass', o: -2, v: .55, p: '0 . 7 . 0 . 7 . -2 . 5 . -2 . 5 . -3 . 4 . -3 . 4 . -1 . 6 . -1 . 6 .' },
+      { i: 'hat', v: .2, p: 'x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.' } ] },
+    sweep: { bpm: 76, root: 62, sc: 'pent', parts: [
+      { i: 'piano', o: 0, v: .35, p: '0 . 2 . 4 . . . 3 . 2 . . . . . 1 . 2 . 3 . . . 4 . . . . . . .' },
+      { i: 'pad', o: -1, v: .35, p: '0+2+4 - - - - - - - - - - - - - - - -1+1+3 - - - - - - - - - - - - - - -' } ] },
+    overworld: { bpm: 116, root: 60, sc: 'maj', parts: [
+      { i: 'bass', o: -2, v: .5, p: '0 . 4 . 7 . 4 . 3 . 7 . 10 . 7 . 4 . 8 . 11 . 8 . 3 . 7 . 4 . 2 . 5 . 9 . 12 . 9 . 3 . 7 . 10 . 7 . 4 . 8 . 6 . 4 . 0 . 4 . 7 . . .' },
+      { i: 'piano', o: 0, v: .4, p: '7 . . 9 . 7 . 4 . . 5 . 7 . . . 8 . . 7 . 5 . 4 . . 2 . 4 . . . 5 . . 7 . 9 . 11 . . 10 . 9 . . . 8 . 7 . 6 . 4 . 2 . 3 . 4 . . .' },
+      { i: 'hat', L: 1, v: .18, p: 'x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...' },
+      { i: 'kick', L: 1, v: .5, p: 'x.......x.......x.......x.......x.......x.......x.......x.......' } ] },
+    night: { bpm: 88, root: 57, sc: 'min', parts: [
+      { i: 'pad', o: -1, v: .45, p: '0+2+4 - - - - - - - - - - - - - - - -2+0+3 - - - - - - - - - - - - - - - -3+-1+2 - - - - - - - - - - - - - - - -1+1+4 - - - - - - - - - - - - - - -' },
+      { i: 'piano', o: 0, v: .35, p: '4 . . . 2 . . . 0 . . 2 . . . . 5 . . . 4 . . . 2 . . . . . . . 2 . . . 0 . . . -1 . . 0 . . . . 4 . . . 6 . . . 7 . . . . . . .' },
+      { i: 'kick', L: 1, v: .5, p: 'x.......x.......x.......x...x...x.......x.......x.......x...x...' } ] },
+    /* jingles (one-shot) */
+    win: { bpm: 140, root: 60, sc: 'maj', once: 1, parts: [
+      { i: 'lead', o: 0, v: .35, p: '0 2 4 7 . 4 7 - 9 - - - 11 - 12 - - - - - . . . .' },
+      { i: 'bass', o: -2, v: .5, p: '0 . . . . . . . 3 . . . 4 . 0 - - - - - . . . .' } ] },
+    lose: { bpm: 90, root: 57, sc: 'min', once: 1, parts: [
+      { i: 'lead', o: 0, v: .3, p: '4 . 3 . 2 . 1 . 0 - - - - - . .' },
+      { i: 'bass', o: -2, v: .5, p: '0 . . . -1 . . . -3 - - - - - . .' } ] }
+  };
+
+  /* ---------- synthesis ---------- */
+  var ac = null, out = null, comp = null, vol = 0.5, muted = false, cur = null, next = 0, step = 0, timer = 0, inten = 0, noiseBuf = null;
+  try { muted = localStorage.getItem('mc_music') === '0'; var v0 = parseFloat(localStorage.getItem('mc_music_vol')); if (v0 >= 0) vol = v0; } catch (e) {}
+  function ctx() {
+    if (ac) return ac;
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      comp = ac.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 4;
+      out = ac.createGain(); out.gain.value = muted ? 0 : vol * 0.5; out.connect(comp); comp.connect(ac.destination);
+      noiseBuf = ac.createBuffer(1, ac.sampleRate * 0.5, ac.sampleRate); var d = noiseBuf.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) { ac = null; }
+    return ac;
+  }
+  function hz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function env(g, t, a, peak, dec, len) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.setTargetAtTime(0.0001, t + Math.max(a, len), dec); }
+  function osc(type, f, t, len, peak, a, dec, filt, detune) {
+    var o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f; if (detune) o.detune.value = detune;
+    var node = o; if (filt) { var b = ac.createBiquadFilter(); b.type = filt[0]; b.frequency.value = filt[1]; if (filt[2]) b.Q.value = filt[2]; o.connect(b); node = b; }
+    node.connect(g); g.connect(out); env(g, t, a, peak, dec, len); o.start(t); o.stop(t + len + dec * 6);
+  }
+  function noise(t, len, peak, filt) {
+    var s = ac.createBufferSource(), g = ac.createGain(), b = ac.createBiquadFilter(); s.buffer = noiseBuf; b.type = filt[0]; b.frequency.value = filt[1];
+    s.connect(b); b.connect(g); g.connect(out); env(g, t, 0.002, peak, len * 0.4, 0.001); s.start(t); s.stop(t + len * 3);
+  }
+  var INST = {
+    piano: function (m, t, len, v) { osc('triangle', hz(m), t, 0.02, v * 0.5, 0.004, 0.5); osc('sine', hz(m) * 2, t, 0.01, v * 0.12, 0.003, 0.25); },
+    bell: function (m, t, len, v) { osc('sine', hz(m), t, 0.01, v * 0.45, 0.002, 0.7); osc('sine', hz(m) * 2.76, t, 0.01, v * 0.12, 0.002, 0.25); },
+    pad: function (m, t, len, v) { osc('sawtooth', hz(m), t, len, v * 0.09, 0.4, 0.5, ['lowpass', 900]); osc('sawtooth', hz(m), t, len, v * 0.09, 0.4, 0.5, ['lowpass', 900], 9); },
+    choir: function (m, t, len, v) { [-7, 0, 8].forEach(function (d) { osc('sawtooth', hz(m), t, len, v * 0.06, 0.5, 0.6, ['bandpass', 750, 1.4], d); }); },
+    bass: function (m, t, len, v) { osc('square', hz(m), t, len * 0.8, v * 0.25, 0.005, 0.08, ['lowpass', 520]); },
+    lead: function (m, t, len, v) { osc('square', hz(m), t, len * 0.85, v * 0.18, 0.01, 0.08, ['lowpass', 2400]); },
+    kick: function (m, t, len, v) { var o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12); g.gain.setValueAtTime(v * 0.9, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18); o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.2); },
+    snare: function (m, t, len, v) { noise(t, 0.12, v * 0.45, ['highpass', 1500]); osc('triangle', 190, t, 0.01, v * 0.25, 0.001, 0.04); },
+    hat: function (m, t, len, v) { noise(t, 0.03, v * 0.3, ['highpass', 7000]); }
+  };
+  /* parse once */
+  function prep(tr) {
+    if (tr._p) return tr; var sc = SC[tr.sc];
+    tr._p = tr.parts.map(function (pt) {
+      var drum = pt.i === 'kick' || pt.i === 'snare' || pt.i === 'hat';
+      var toks = drum ? pt.p.split('') : pt.p.trim().split(/\s+/), ev = [];
+      toks.forEach(function (tk, s) {
+        if (drum) { if (tk === 'x') ev.push({ s: s, n: [0], len: 1 }); return; }
+        if (tk === '.') return;
+        if (tk === '-') { if (ev.length && ev[ev.length - 1].end === s) { ev[ev.length - 1].len++; ev[ev.length - 1].end++; } return; }
+        var ns = tk.split('+').map(function (d) { d = +d; var L = sc.length, oc = Math.floor(d / L), ix = ((d % L) + L) % L; return tr.root + (pt.o || 0) * 12 + sc[ix] + oc * 12; });
+        ev.push({ s: s, n: ns, len: 1, end: s + 1 });
+      });
+      return { i: pt.i, v: pt.v || .4, L: pt.L || 0, ev: ev, n: toks.length };
+    });
+    tr._len = Math.max.apply(null, tr._p.map(function (p) { return p.n; }));
+    return tr;
+  }
+  function tick() {
+    if (!ac || !cur) return;
+    var tr = cur, sd = 60 / tr.bpm / 4;
+    while (next < ac.currentTime + 0.12) {
+      var s = step % tr._len;
+      tr._p.forEach(function (pt) {
+        if (pt.L === 1 && inten < 0.5) return; if (pt.L === 2 && inten < 0.85) return;
+        var ps = s % pt.n;
+        pt.ev.forEach(function (e) { if (e.s === ps) e.n.forEach(function (m) { try { INST[pt.i](m, next, e.len * sd, pt.v); } catch (x) {} }); });
+      });
+      next += sd; step++;
+      if (tr.once && step >= tr._len) { cur = null; break; }
+    }
+  }
+  function play(name, opt) {
+    var tr = T[name]; if (!tr) return;
+    if (cur === tr && !tr.once) return;
+    cur = prep(tr); step = 0; pending = null;
+    if (!ctx()) return;
+    if (ac.state === 'suspended') { pending = name; return; }
+    next = ac.currentTime + 0.05;
+    /* brief fade-in on track change */
+    out.gain.cancelScheduledValues(ac.currentTime); out.gain.setValueAtTime(0.0001, ac.currentTime); out.gain.exponentialRampToValueAtTime(muted ? 0.0001 : vol * 0.5 + 0.0001, ac.currentTime + 0.6);
+    if (!timer) timer = setInterval(tick, 25);
+  }
+  var pending = null;
+  /* browsers start audio only after a user gesture */
+  function unlock() { if (!ctx()) return; if (ac.state === 'suspended') ac.resume().then(function () { if (cur) { next = ac.currentTime + 0.05; if (!timer) timer = setInterval(tick, 25); } }); }
+  ['pointerdown', 'keydown', 'touchstart'].forEach(function (e) { window.addEventListener(e, unlock, { passive: true }); });
+  function stop() { cur = null; }
+  function setMuted(m) { muted = !!m; try { localStorage.setItem('mc_music', m ? '0' : '1'); } catch (e) {} if (out) out.gain.setTargetAtTime(muted ? 0 : vol * 0.5, ac.currentTime, 0.1); }
+  function setVol(v) { vol = Math.max(0, Math.min(1, v)); try { localStorage.setItem('mc_music_vol', String(vol)); } catch (e) {} if (out && !muted) out.gain.setTargetAtTime(vol * 0.5, ac.currentTime, 0.1); }
+  return { play: play, stop: stop, intensity: function (x) { inten = Math.max(0, Math.min(1, x)); }, setMuted: setMuted, isMuted: function () { return muted; }, setVol: setVol,
+    current: function () { if (!cur) return null; for (var k in T) if (T[k] === cur) return k; return null; }, tracks: Object.keys(T) };
+})();
+
+</script>
+<script>
 /* Block Duel UI: screens, board rendering, action pipeline, AI pacing, room-based online play. */
 {
 var C = E.C;
@@ -2077,11 +2277,28 @@ function detailHTML(id, extra) {
     '<div style="white-space:pre-line">' + esc(d.tx) + '</div>' + (extra || '') + '</div></div>';
 }
 
+/* ---------- music: track by screen and board state, intensity by how close the duel is to ending ---------- */
+var FIELD_MUSIC = { mon: 'ocean', nfr: 'nether', vil: 'village', tch: 'trial', dpc: 'sculk', wman: 'raid', mine: 'cave', dgn: 'cave' };
+function sceneMusic() {
+  if (typeof MUSIC === 'undefined') return;
+  var G = ST.G, onGame = $('#game').classList.contains('on');
+  if (!onGame || !G) { MUSIC.play('menu'); return; }
+  if (G.winner >= 0) return;
+  if (ST.tut) { MUSIC.play('menu'); return; }
+  var raid = G.P.some(function (P) { return P.ez && P.ez.c.id === 'omen'; });
+  var f = G.P[ST.me].fz || G.P[1 - ST.me].fz, tr = raid ? 'raid' : f && FIELD_MUSIC[f.c.id] ? FIELD_MUSIC[f.c.id] : 'duel';
+  MUSIC.play(tr);
+  var low = Math.min(G.P[0].lp, G.P[1].lp) / E.K.lp;
+  MUSIC.intensity(Math.max(Math.min(1, (0.75 - low) / 0.5), G.turn >= 6 ? 0.55 : 0.2));
+}
+window.__musicRefresh = sceneMusic;
+
 /* ---------- screens ---------- */
 function show(id) {
   document.querySelectorAll('.scr').forEach(function (s) { s.classList.toggle('on', s.id === id); });
   if (id === 'menu') drawMenu(); if (id === 'pick') drawPick(); if (id === 'build') drawBuild(); if (id === 'dex') drawDex(); if (id === 'online') netEnter();
   if (id === 'tut') drawTut(); if (id === 'reps') drawReps();
+  sceneMusic();
 }
 document.addEventListener('click', function (e) {
   var g = e.target.closest('[data-go]'); if (g) { SFX.tap(); show(g.dataset.go); }
@@ -2296,6 +2513,7 @@ function render() {
   else if (mine && G.winner < 0) hint = G.phase === 'battle' ? (ST.sel >= 0 ? '点对手的怪兽进行攻击' : '点发光的攻击表示怪兽选择攻击') : (G.turn === 1 && G.cur === G.first ? '先攻第一回合不能战斗 · 点发光的卡出牌' : '点发光的卡出牌，准备好了点「战斗」');
   else if (G.winner < 0) hint = ST.mode === 'rep' ? '回放中' : ST.mode === 'ai' ? '对手思考中…' : '等待对手行动…';
   $('#hint').textContent = hint;
+  sceneMusic();
   var ab = $('#atkbar');
   if (ST.sel >= 0 && mine && !G.ask) {
     ab.classList.add('on'); var r = $('#mmz').getBoundingClientRect(), R = $('#app').getBoundingClientRect(); ab.style.top = (r.top - R.top - 44) + 'px';
@@ -2557,6 +2775,7 @@ function gameOver() {
     '<div style="display:grid;gap:10px;width:min(280px,100%);margin-top:10px">' + (ST.mode === 'spec' || ST.mode === 'rep' ? '' : '<button class="btn g" id="again">再来一局</button>') +
     '<button class="btn" id="oLog">查看记录</button><button class="btn" id="oQuit">' + (ST.mode === 'ai' ? '返回主菜单' : ST.mode === 'rep' ? '返回回放列表' : '离开房间') + '</button></div><div id="againMsg" class="wait"></div>';
   o.classList.add('on'); snd(G.winner === ST.me ? 880 : 200, .5, 'triangle', .1);
+  if (typeof MUSIC !== 'undefined') MUSIC.play(G.winner === ST.me || (ST.mode === 'spec' && G.winner < 2) ? 'win' : 'lose');
   if ($('#again')) $('#again').onclick = function () {
     if (ST.mode === 'ai') { o.classList.remove('on'); $('#startAi').onclick(); }
     else { netRematch(); $('#againMsg').textContent = '等待对手确认…'; }
@@ -2851,6 +3070,9 @@ $('#onBack').onclick = function () { if (NET.dr && !(ST.G && ST.G.winner < 0)) n
 window.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSheet(); ST.sel = -1; render(); } if (e.key === 'Enter' && e.target.matches && e.target.matches('.cd[role=button]')) e.target.click(); });
 FX.init($('#app'));
 drawMenu();
+function drawMus() { var b = $('#mus'); if (b && typeof MUSIC !== 'undefined') { b.textContent = MUSIC.isMuted() ? '音乐 关' : '音乐 开'; b.className = 'btn s' + (MUSIC.isMuted() ? '' : ' t'); } }
+$('#mus').onclick = function () { MUSIC.setMuted(!MUSIC.isMuted()); drawMus(); sceneMusic(); };
+drawMus(); sceneMusic();
 window.addEventListener('resize', function () { if ($('#menu').classList.contains('on')) drawMenu(); if (ST.G && $('#game').classList.contains('on')) render(); });
 window.__bd = { ST: ST, NET: NET, render: render, myAct: myAct, startGame: startGame, startTut: startTut, startReplay: startReplay, store: store };
 }
