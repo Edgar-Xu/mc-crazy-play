@@ -71,8 +71,11 @@ box-shadow:inset 0 0 0 2px rgba(0,0,0,.35),0 3px 0 rgba(0,0,0,.35);color:#1d140b
 .lp{flex:1;height:16px;background:#2a1717;border:2px solid #000;position:relative}
 .lp i{position:absolute;inset:0;right:auto;background:linear-gradient(#ff6a5a,#c6281c);transition:width .4s}
 .lp b{position:absolute;inset:0;text-align:center;font:11px/12px Silkscreen,monospace;color:#fff;text-shadow:0 1px 0 #000}
-.pile{font-size:11px;color:var(--mute);display:flex;gap:6px;white-space:nowrap}
-.pile button{background:rgba(255,255,255,.08);padding:3px 6px;border-radius:3px;min-height:28px;font-size:11px;color:var(--mute)}
+.pile{font-size:11px;color:var(--mute);display:flex;gap:4px;white-space:nowrap;flex-wrap:wrap;justify-content:flex-end}
+.pile button{background:rgba(255,255,255,.08);padding:3px 5px;border-radius:3px;min-height:28px;font-size:11px;color:var(--mute)}
+.pile button.can{color:var(--gold);box-shadow:0 0 0 2px var(--gold);animation:glowp 1.4s ease-in-out infinite}
+@keyframes glowp{50%{box-shadow:0 0 0 2px var(--gold),0 0 10px var(--gold)}}
+@media (prefers-reduced-motion:reduce){.pile button.can{animation:none}}
 .oh{flex:none;height:20px;display:flex;justify-content:center;gap:2px;padding-top:2px}
 .oh span{width:13px;height:17px;background:#3a2513;border:1px solid #000;box-shadow:inset 0 3px 0 var(--grass)}
 .row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));justify-items:center;align-items:center;padding:0 8px}
@@ -308,9 +311,9 @@ input.tx{font:16px system-ui;padding:10px 12px;border-radius:4px;border:2px soli
   <div id="over"></div>
   <div id="toast"></div>
 </div>
-<script>window.MC_APP={v:"2.1.2"};</script>
+<script>window.MC_APP={v:"3.0.0"};</script>
 <script>
-﻿/* Block Duel engine: deterministic, serialisable state; all randomness from G.rs.
+/* Block Duel engine: deterministic, serialisable state; all randomness from G.rs.
    Card behaviour lives on the card definitions as hooks. Effects that may be interrupted
    (trap windows, player choices) run on an explicit task stack G.stack; a pending choice
    is stored in G.ask and answered with an {t:'ans'} action by seat G.ask.p. */
@@ -388,11 +391,12 @@ var E = (function () {
   /* Remove a monster from the field. dest: 'grave' | 'hand'. Tokens vanish; cards return to their owner. */
   function leave(G, p, z, dest) {
     var P = G.P[p], m = P.mz[z]; P.mz[z] = null; cleanupEquips(G, p);
-    var d = C[m.c.id], O = G.P[m.own === undefined ? p : m.own];
+    var d = C[m.c.id], oi = m.own === undefined ? p : m.own, O = G.P[oi];
     if (m.xyz) m.xyz.forEach(function (c) { if (!C[c.id].tok) O.grave.push(c); });
     if (d.tok) return m;
     if (dest === 'hand') { if (d.x) O.extra.push(m.c); else O.hand.push(m.c); }
-    else O.grave.push(m.c);
+    else if (dest === 'ban') banish(G, oi, m.c);
+    else toGrave(G, oi, m.c, 'f');
     return m;
   }
   /* how: 'n' normal/set, 'f' flip, 'c' craft, 's' special, 'rs' redstone, 'x' enchant, 'r' trial */
@@ -411,6 +415,7 @@ var E = (function () {
     var f = fieldDef(G, p); if (f && f.fd && f.fd.protect && f.fd.protect(G, p, z, m, why)) return false;
     leave(G, p, z, 'grave');
     log(G, nm(m.c) + ' 被破坏'); fx(G, { k: 'die', p: p, z: z, id: m.c.id });
+    if (why === 'battle' && f && f.fd && f.fd.lost) f.fd.lost(G, p, m);
     if (why === 'battle' && d.on && d.on.battleDestroyed) d.on.battleDestroyed(G, p, z, m);
     if (why !== 'battle' && d.on && d.on.effDestroyed) d.on.effDestroyed(G, p, z, m);
     if (d.on && d.on.destroyed) d.on.destroyed(G, p, z, m);
@@ -430,10 +435,10 @@ var E = (function () {
     choose(G, p, 'card', ids, tx, 'srchRes', { p: p });
   }
   function monsZ(G, q, pred) { var o = []; G.P[q].mz.forEach(function (m, z) { if (m && pred(m, C[m.c.id], z)) o.push([q, z]); }); return o; }
-  function summonFromHand(G, p, u, how) {
+  function summonFromHand(G, p, u, how, pos) {
     var P = G.P[p], f = freeM(P); if (f < 0) return;
     var c = removeHand(P, u); if (!c) return;
-    place(G, p, f, c, 'a', true, how || 's'); log(G, P.nick + ' 特殊召唤 ' + nm(c)); summoned(G, p, f, how || 's');
+    place(G, p, f, c, pos || 'a', true, how || 's'); log(G, P.nick + ' 特殊召唤 ' + nm(c) + (pos === 'd' ? '（守备表示）' : '')); summoned(G, p, f, how || 's');
   }
   function onlyNS(how) { return how === 'n' || how === 'f'; }
   /* Ancient-city counter: seat q's opponent activated a card. */
@@ -451,6 +456,70 @@ var E = (function () {
     if (!c) return;
     place(G, q, f, c, 'a', true, 's'); log(G, '幽匿计数满了！' + nm(c) + ' 从深处苏醒'); summoned(G, q, f, 's');
   }
+
+  /* ---------- v3 helpers: ender chest (banished zone), graveyard traffic, jobs ---------- */
+  /* A series is a race for monsters and an explicit set tag for spells and traps. */
+  function isSet(d, s) { return !!d && (d.r === s || d.set === s); }
+  /* Hard once per turn, keyed by name: true the first time in a turn, false afterwards. */
+  function opt(G, p, key) { var P = G.P[p]; P.oT = P.oT || {}; if (P.oT[key] === G.turn) return false; P.oT[key] = G.turn; return true; }
+  function banish(G, p, c) {
+    if (!c || !C[c.id] || C[c.id].tok) return;
+    G.P[p].ban.push(c); fx(G, { k: 'ban', p: p, id: c.id });
+    var d = C[c.id]; if (d.on && d.on.banished) push(G, { k: 'banT', d: { p: p, u: c.u } });
+  }
+  /* Every card that reaches a graveyard from the field, hand or deck goes through here (from: 'f'|'h'|'d'). */
+  function toGrave(G, p, c, from) {
+    if (!c || !C[c.id] || C[c.id].tok) return;
+    G.P[p].grave.push(c);
+    var d = C[c.id]; if (d.on && d.on.toGrave) push(G, { k: 'tgRes', d: { p: p, u: c.u, from: from } });
+  }
+  function mill(G, p, n) {
+    var P = G.P[p];
+    for (var i = 0; i < n && P.deck.length; i++) { var c = P.deck.pop(); dkOut(P, c.id); log(G, nm(c) + ' 从卡组送去墓地'); toGrave(G, p, c, 'd'); }
+  }
+  /* Banish the n oldest graveyard cards of seat p (optionally sparing uid keep). Returns the count. */
+  function banOld(G, p, n, keep) {
+    var P = G.P[p], k = 0;
+    for (var i = 0; i < P.grave.length && k < n;) { if (P.grave[i].u === keep) { i++; continue; } banish(G, p, P.grave.splice(i, 1)[0]); k++; }
+    if (k) log(G, P.nick + ' 将墓地 ' + k + ' 张卡封存进末影箱');
+    return k;
+  }
+  function banMon(G, p, z) { var m = leave(G, p, z, 'ban'); log(G, nm(m.c) + ' 被封存进末影箱'); fx(G, { k: 'die', p: p, z: z, id: m.c.id }); }
+  /* Spell/trap-row targets of seat q as [kind, index]: 's' spell zone, 'f' field, 'e' event. */
+  function stTargets(G, q, upOnly) {
+    var P = G.P[q], o = [];
+    P.sz.forEach(function (s, i) { if (s && (!upOnly || s.up)) o.push(['s', i]); });
+    if (P.fz) o.push(['f', 0]); if (P.ez) o.push(['e', 0]);
+    return o;
+  }
+  function stCard(G, q, tg) { var P = G.P[q]; return tg[0] === 's' ? (P.sz[tg[1]] && P.sz[tg[1]].c) : tg[0] === 'f' ? (P.fz && P.fz.c) : (P.ez && P.ez.c); }
+  function removeST(G, q, kind, i, ban) {
+    var P = G.P[q], c = null, up = true;
+    if (kind === 's' && P.sz[i]) { c = P.sz[i].c; up = P.sz[i].up; P.sz[i] = null; }
+    else if (kind === 'f' && P.fz) { c = P.fz.c; P.fz = null; fx(G, { k: 'field', p: q }); }
+    else if (kind === 'e' && P.ez) { c = P.ez.c; P.ez = null; fx(G, { k: 'event', p: q }); }
+    if (!c) return null;
+    log(G, (up ? nm(c) : '盖放的卡') + (ban ? ' 被封存进末影箱' : ' 被破坏'));
+    if (ban) banish(G, q, c); else P.grave.push(c);
+    return { c: c, up: up };
+  }
+  /* Card filter from a plain (serialisable) spec, so that deferred jobs can carry it in the task stack. */
+  function pr(s) {
+    return function (d) {
+      if (!d || d.hid || d.tok || d.x) return false;
+      if (s.any) return s.any.some(function (t) { return pr(t)(d); });
+      return (!s.k || (s.k === 'm' ? d.k === 'm' : s.k === 'st' ? d.k === 's' || d.k === 't' : d.k === s.k)) &&
+        (!s.set || isSet(d, s.set)) && (!s.lv || (d.k === 'm' && d.lv <= s.lv)) && (!s.ex || d.id !== s.ex) &&
+        (!s.at || d.at === s.at) && (!s.nt || !d.tun) && (!s.sub || d.sub === s.sub) && (!s.tr || d.trial) &&
+        (!s.id || (Array.isArray(s.id) ? s.id.indexOf(d.id) >= 0 : d.id === s.id));
+    };
+  }
+  function hasDeck(G, p, s) { var f = pr(s); return deckIds(G, p).some(function (id) { return f(C[id]); }); }
+  function hasGrave(G, p, s) { var f = pr(s); return G.P[p].grave.some(function (c) { return f(C[c.id]); }); }
+  /* Deferred effect step; runs after the current step, so it never nests a pending choice. */
+  function job(G, k, p, s) { push(G, { k: k, d: Object.assign({ p: p }, s || {}) }); }
+  function posOf(a) { return a && a.d ? 'd' : 'a'; }
+  function ownerOf(p, m) { return m.own === undefined ? p : m.own; }
 
   /* ---------- card pool ---------- */
   /* --- v1: Grassland / Undead / Lava-Void --- */
@@ -476,7 +545,7 @@ var E = (function () {
   M('spd', '洞穴蜘蛛', 3, 1100, 600, 'm', '野兽', '直接攻击造成伤害时，对手随机丢弃1张手牌。',
     { on: { directHit: function (G, p) {
       var O = G.P[1 - p]; if (!O.hand.length) return;
-      var c = O.hand.splice(rnd(G, O.hand.length), 1)[0]; O.grave.push(c); log(G, O.nick + ' 被迫丢弃 ' + nm(c));
+      var c = O.hand.splice(rnd(G, O.hand.length), 1)[0]; log(G, O.nick + ' 被迫丢弃 ' + nm(c)); toGrave(G, 1 - p, c, 'h');
     } } });
   M('skl', '骷髅弓手', 4, 1400, 800, 'm', '亡灵', '召唤成功时，给予对手300伤害。',
     { on: { summon: function (G, p, z, how) { if (onlyNS(how)) damage(G, 1 - p, 300); } } });
@@ -485,7 +554,7 @@ var E = (function () {
   M('smi', '铁匠村民', 4, 1200, 1200, 'g', '村民', '召唤成功时，从卡组将1张装备魔法加入手牌。',
     { on: { summon: function (G, p, z, how) { if (onlyNS(how)) search(G, p, function (d) { return d.sub === 'eq'; }, '选择1张装备魔法加入手牌'); } } });
   M('stg', '石块傀儡', 4, 800, 2000, 'm', '构造体', '由圆石堆砌而成的守卫，几乎推不动。', { nor: 1 });
-  M('lsl', '熔岩史莱姆', 4, 1700, 800, 'l', '史莱姆', '在熔岩湖里泡大的史莱姆，碰一下就烫手。', { nor: 1 });
+  M('lsl', '熔岩史莱姆', 4, 1800, 800, 'l', '史莱姆', '在熔岩湖里泡大的史莱姆，碰一下就烫手。', { nor: 1 });
   M('dkn', '钻石骑士', 5, 2100, 1500, 'm', '村民', '装备了装备魔法时，攻击力再+300。',
     { mod: { atk: function (G, p, z, m) { return equipsOf(G, p, m.c.u).length ? 300 : 0; } } });
   M('vwk', '虚空行者', 5, 2000, 1200, 'v', '异界', '召唤成功时，随机破坏对手场上1张盖放的魔法陷阱卡。',
@@ -496,8 +565,8 @@ var E = (function () {
     } } });
   M('mgc', '熔岩块', 2, 800, 600, 'l', '史莱姆', '被战斗破坏时，在原位置特殊召唤1只「小熔岩块」衍生物（500/300，熔岩属性）。',
     { on: { battleDestroyed: function (G, p, z) { token(G, p, z, 'mgt'); } } });
-  M('fsp', '火焰精灵', 3, 1300, 800, 'l', '元素', '召唤成功时，给予对手200伤害。',
-    { on: { summon: function (G, p, z, how) { if (onlyNS(how)) damage(G, 1 - p, 200); } } });
+  M('fsp', '火焰精灵', 3, 1300, 800, 'l', '元素', '召唤成功时，给予对手300伤害。',
+    { on: { summon: function (G, p, z, how) { if (onlyNS(how)) damage(G, 1 - p, 300); } } });
   M('lgo', '熔岩巨像', 6, 2500, 1800, 'l', '构造体', '攻击守备表示怪兽时，造成贯穿伤害。', { pi: 1 });
   M('igd', '铁卫傀儡', 6, 2100, 2600, 'g', '构造体', '被攻击时，攻击怪兽在伤害计算中攻击力-500。', { guard: 500 });
   M('abw', '深渊守望者', 7, 2600, 2200, 'v', '异界', '召唤成功时，对手场上所有表侧攻击表示怪兽变为守备表示。',
@@ -534,7 +603,7 @@ var E = (function () {
   M('sqd', '鱿鱼', 3, 800, 1500, 'o', '水族', '被攻击时，攻击怪兽在伤害计算中攻击力-400（墨汁）。', { guard: 400 });
   M('drw', '溺水者', 4, 1600, 1000, 'o', '亡灵', '亡灵族兼海洋属性。装备「三叉戟」时攻击力再+500。',
     { mod: { atk: function (G, p, z, m) { return hasEquip(G, p, m, 'tri') ? 500 : 0; } } });
-  M('elg', '远古巨鳞鱼', 6, 2000, 2200, 'o', '水族', '被攻击时，攻击怪兽在伤害计算中攻击力-400（疲劳光束）。每回合1次不会被效果破坏。',
+  M('elg', '远古巨鳞鱼', 6, 2200, 2200, 'o', '水族', '被攻击时，攻击怪兽在伤害计算中攻击力-400（疲劳光束）。每回合1次不会被效果破坏。',
     { guard: 400,
       on: { preDestroy: function (G, p, z, m, why) { if (why === 'battle' || m.ep === G.turn) return false; m.ep = G.turn; log(G, '远古巨鳞鱼抵挡了效果'); return true; } } });
   /* --- Redstone machines --- */
@@ -651,13 +720,13 @@ var E = (function () {
     return Object.assign({ eq: { a: a, d: d, pi: pi }, hold: 600,
       sp: { acts: function (G, p, h, A) { G.P[p].mz.forEach(function (m, z) { if (m && m.up) A.push({ t: 'sp', h: h, tg: z }); }); },
         prep: function (G, p, a) { return { u: G.P[p].mz[a.tg].c.u }; },
-        run: function (G, p, a, cap, sz) { G.P[p].sz[sz].eq = cap.u; } } }, ex || {});
+        run: function (G, p, a, cap, sz) { if (G.P[p].sz[sz]) G.P[p].sz[sz].eq = cap.u; } } }, ex || {});
   }
-  S('wb', '工作台', 'n', '把手牌或自己场上的合成素材送去墓地，从合成区合成召唤1只怪兽。', { sp: {
+  S('wb', '工作台', 'n', '把手牌或自己场上的合成素材送去墓地，从合成区合成召唤1只怪兽。', { ssp: 1, sp: {
     acts: function (G, p, h, A) {
       var P = G.P[p], pool = [];
       P.hand.forEach(function (c, i) { if (i !== h && C[c.id].k === 'm') pool.push({ ref: 'h' + i, id: c.id, f: 0 }); });
-      P.mz.forEach(function (m, z) { if (m && !C[m.c.id].notr) pool.push({ ref: 'f' + z, id: m.c.id, f: 1 }); });
+      P.mz.forEach(function (m, z) { if (m && !C[m.c.id].notr && !m.nm) pool.push({ ref: 'f' + z, id: m.c.id, f: 1 }); });
       var occ = P.mz.filter(Boolean).length, seen = {};
       P.extra.forEach(function (c, x) {
         if (seen[c.id]) return; seen[c.id] = 1;
@@ -675,10 +744,10 @@ var E = (function () {
     },
     run: function (G, p, a, cap) {
       var P = G.P[p], x = P.extra[a.x];
-      cap.m.forEach(function (mm) { if (mm.h !== undefined) P.grave.push(removeHand(P, mm.h)); });
+      cap.m.forEach(function (mm) { if (mm.h !== undefined) toGrave(G, p, removeHand(P, mm.h), 'h'); });
       cap.m.forEach(function (mm) { if (mm.z !== undefined) leave(G, p, mm.z, 'grave'); });
       P.extra.splice(a.x, 1);
-      var f = freeM(P); place(G, p, f, x, 'a', true, 'c');
+      var f = freeM(P); place(G, p, f, x, posOf(a), true, 'c');
       log(G, P.nick + ' 合成召唤 ' + nm(x)); fx(G, { k: 'craft', p: p, z: f });
       summoned(G, p, f, 'c');
     } } });
@@ -701,7 +770,7 @@ var E = (function () {
   S('fur', '熔炉', 'n', '从卡组抽2张。', { lim: 1, sp: {
     acts: onField(function (G, p) { return G.P[p].deck.length >= 2; }),
     run: function (G, p) { draw(G, p, 2); log(G, G.P[p].nick + ' 抽2张'); } } });
-  S('tot', '不死图腾', 'n', '选择双方墓地中1只怪兽，在自己场上特殊召唤。', { lim: 1, sp: {
+  S('tot', '不死图腾', 'n', '选择双方墓地中1只怪兽，在自己场上特殊召唤。', { lim: 1, ssp: 1, sp: {
     acts: function (G, p, h, A) {
       if (freeM(G.P[p]) < 0) return;
       [p, 1 - p].forEach(function (q) {
@@ -713,7 +782,7 @@ var E = (function () {
     run: function (G, p, a, cap) {
       var P = G.P[p], gv = G.P[cap.q].grave, gi = findU(gv, cap.u); if (gi < 0) return;
       var c = gv.splice(gi, 1)[0], f = freeM(P); if (f < 0) { gv.push(c); return; }
-      var m = place(G, p, f, c, 'a', true, 's'); m.own = cap.q;
+      var m = place(G, p, f, c, posOf(a), true, 's'); m.own = cap.q;
       log(G, P.nick + ' 复活了 ' + nm(c));
       summoned(G, p, f, 's');
     } } });
@@ -775,7 +844,7 @@ var E = (function () {
     aura: { atk: function (G, owner, p, z, m) { return owner === p && C[m.c.id].tok ? 200 : 0; } } });
   /* Trial keys (ritual spells) */
   function keySpell(minLv, omen) {
-    return { sp: {
+    return { ssp: 1, sp: {
       acts: function (G, p, h, A) {
         var P = G.P[p], pool = [];
         P.mz.forEach(function (m, z) { if (m && !C[m.c.id].notr) pool.push({ ref: 'f' + z, lv: C[m.c.id].lv, f: 1 }); });
@@ -804,10 +873,10 @@ var E = (function () {
           log(G, P.nick + ' 献祭 ' + nm(c));
           if (d.on && d.on.tributed && (!m || m.up)) d.on.tributed(G, p, m);
           if (m) { leave(G, p, mm.z, 'grave'); fx(G, { k: 'die', p: p, z: mm.z, id: c.id }); }
-          else P.grave.push(removeHand(P, mm.h));
+          else toGrave(G, p, removeHand(P, mm.h), 'h');
         });
         var f = freeM(P), c = removeHand(P, cap.t); if (f < 0 || !c) return;
-        var m = place(G, p, f, c, 'a', true, 'r'); if (omen) m.ok = 1;
+        var m = place(G, p, f, c, posOf(a), true, 'r'); if (omen) m.ok = 1;
         log(G, P.nick + ' 试炼召唤 ' + nm(c)); fx(G, { k: 'trial', p: p, z: f });
         summoned(G, p, f, 'r');
       } } };
@@ -819,7 +888,7 @@ var E = (function () {
   S('mine', '废弃矿井', 'fd', '场地：自己的矿洞属性怪兽攻击力+200。每回合1次：丢弃1张手牌，抽1张卡。', fd({
     aura: { atk: function (G, owner, p, z, m) { return owner === p && C[m.c.id].at === 'm' ? 200 : 0; } },
     ign: { acts: function (G, p, A) { G.P[p].hand.forEach(function (c, h) { A.push({ t: 'fe', h: h }); }); },
-      run: function (G, p, a) { var P = G.P[p], c = P.hand.splice(a.h, 1)[0]; P.grave.push(c); log(G, P.nick + ' 丢弃 ' + nm(c) + '，抽1张'); draw(G, p, 1); } },
+      run: function (G, p, a) { var P = G.P[p], c = P.hand.splice(a.h, 1)[0]; log(G, P.nick + ' 丢弃 ' + nm(c) + '，抽1张'); toGrave(G, p, c, 'h'); draw(G, p, 1); }, ds: function (G, p, a) { return '丢弃 ' + C[G.P[p].hand[a.h].id].n + '，抽1张'; } },
     shade: 1 }));
   S('dgn', '地牢', 'fd', '场地：自己回合结束时，在自己场上特殊召唤1只刷出的怪物衍生物（500/500，亡灵或野兽族，随机）；夜晚改为2只。由地牢刷出的衍生物最多同时存在2只。', fd({
     turnEnd: function (G, owner) {
@@ -846,8 +915,8 @@ var E = (function () {
     aura: { def: function (G, owner, p, z, m) { return owner === p && C[m.c.id].r === '村民' ? 300 : 0; } },
     turnStart: function (G, owner) { if (G.cur === owner) gainEm(G, owner, 1); } }));
   S('dpc', '远古深城', 'fd', '场地：对手每发动1张卡（魔法、陷阱或怪兽效果），放1个幽匿计数；达到5个时清空，从自己手牌或卡组特殊召唤「幽匿巨像」。', fd({ shade: 1 }));
-  S('nfr', '下界要塞', 'fd', '场地：自己的熔岩属性怪兽攻击力+300。每个回合结束时，双方各受到100伤害（高温）。', fd({
-    aura: { atk: function (G, owner, p, z, m) { return owner === p && C[m.c.id].at === 'l' ? 300 : 0; } },
+  S('nfr', '下界要塞', 'fd', '场地：自己的熔岩属性怪兽攻击力+400。每个回合结束时，双方各受到100伤害（高温）。', fd({
+    aura: { atk: function (G, owner, p, z, m) { return owner === p && C[m.c.id].at === 'l' ? 400 : 0; } },
     turnEnd: function (G) { log(G, '要塞的高温灼烤着双方'); damage(G, 0, 100); damage(G, 1, 100); } }));
   /* Events: placed in the event zone with a countdown (ez.left, in turns). */
   function evc(o) { return { sp: { acts: function (G, p, h, A) { if (!G.P[p].ez && (!o.can || o.can(G, p))) A.push({ t: 'sp', h: h }); } }, ev: o }; }
@@ -911,22 +980,224 @@ var E = (function () {
     cond: function (G, q, info) { return !immuneTrap(G, info.p, info.z); },
     run: function (G, q, info) { var m = G.P[info.p].mz[info.z]; if (m) m.pos = 'd'; G.phase = 'main2'; log(G, '尖啸声让攻击停了下来'); return true; } } });
 
-  var EXTRA = ['dgo', 'wrd', 'zkg', 'skg', 'lvd', 'rsn', 'rpr', 'rcr', 'fly', 'rmg', 'esh', 'eds', 'elk'];
+  /* ======================= v3 pool ======================= */
+  /* Effects marked "每回合1次" on triggers use opt(); graveyard effects (gy) cost banishing the card itself and
+     are once per turn per name; hand effects (hnd) likewise. ign may be an array (several effects, each once per turn). */
+  var HOG = function (d) { return isSet(d, '猪族'); }, END = function (d) { return isSet(d, '末地'); }, PLY = function (d) { return isSet(d, '玩家'); };
+  function gyIf(test, run, ds, ssp) { return { acts: function (G, p, i, c, A) { if (test(G, p, c)) A.push({ t: 'gy', i: i }); }, run: run, ds: ds, ssp: ssp }; }
+  function upOn(G, p, f) { return G.P[p].mz.some(function (m) { return m && m.up && f(C[m.c.id], m); }); }
+  function stLabel(G, q, tg) { var c = stCard(G, q, tg), up = tg[0] !== 's' || (G.P[q].sz[tg[1]] && G.P[q].sz[tg[1]].up); return c ? (up ? C[c.id].n : '盖放的卡') : '?'; }
+
+  /* --- Nether hogs: searchers, chained special summons, a king that will not stay down --- */
+  M('pgs', '猪族斥候', 2, 600, 400, 'l', '猪族', '①通常召唤成功时（每回合1次）：从卡组将1只「猪族斥候」以外的猪族怪兽加入手牌。\n②封存墓地的这张卡：从手牌特殊召唤1只4星以下猪族怪兽。',
+    { on: { summon: function (G, p, z, how) { if (onlyNS(how) && opt(G, p, 'pgs')) job(G, 'jSrch', p, { k: 'm', set: '猪族', ex: 'pgs', tx: '选择1只猪族怪兽加入手牌' }); } },
+      gy: gyIf(function (G, p) { return freeM(G.P[p]) >= 0 && G.P[p].hand.some(function (h) { return pr({ k: 'm', set: '猪族', lv: 4 })(C[h.id]); }); },
+        function (G, p) { job(G, 'jSsHand', p, { set: '猪族', lv: 4, tx: '选择要特殊召唤的猪族怪兽' }); }, '从手牌特殊召唤1只4星以下猪族') });
+  M('pgb', '猪族蛮兵', 4, 1400, 800, 'l', '猪族', '①自己场上有其他猪族怪兽时，可以从手牌以守备表示特殊召唤（每回合1次）；这个方法特殊召唤的这张卡不能作为红石召唤和合成召唤的素材。\n②战斗破坏对手怪兽时：给予对手300伤害。',
+    { ssPos: 'd', ssNoMat: 1, selfSS: function (G, p) { return upOn(G, p, HOG); }, on: { battleWin: function (G, p) { damage(G, 1 - p, 300); } } });
+  M('pgm', '猪族金匠', 3, 1000, 1000, 'l', '猪族', '①召唤·特殊召唤成功时（每回合1次）：从卡组将1张猪族魔法·陷阱卡加入手牌。\n②被战斗破坏时：给予对手300伤害。',
+    { on: { summon: function (G, p) { if (opt(G, p, 'pgm')) job(G, 'jSrch', p, { k: 'st', set: '猪族', tx: '选择1张猪族魔法·陷阱卡' }); },
+      battleDestroyed: function (G, p) { damage(G, 1 - p, 300); } } });
+  M('pgk', '猪族萌崽', 1, 300, 200, 'l', '猪族', '调整。\n①从场上送去墓地时（每回合1次）：从卡组特殊召唤1只「猪族萌崽」以外的3星以下猪族怪兽（守备表示）。',
+    { tun: 1, on: { toGrave: function (G, p, c, from) { if (from === 'f' && opt(G, p, 'pgk')) job(G, 'jSsDk', p, { set: '猪族', lv: 3, ex: 'pgk', pos: 'd', tx: '萌崽：选择要特殊召唤的猪族' }); } } });
+  M('pgz', '猪族狂战士', 5, 2000, 1200, 'l', '猪族', '①自己场上每有1只其他猪族怪兽，这张卡攻击力+200。\n②攻击守备表示怪兽时，造成贯穿伤害。',
+    { pi: 1, mod: { atk: function (G, p, z, m) { return 200 * G.P[p].mz.filter(function (o) { return o && o !== m && o.up && HOG(C[o.c.id]); }).length; } } });
+  M('phk', '猪皇', 7, 2600, 2200, 'l', '猪族', '①被破坏送去墓地时（每回合1次）：可以封存自己墓地最早的2张其他卡，把这张卡从墓地特殊召唤。\n②战斗破坏对手怪兽时：抽1张卡。\n「猪皇永不陨落。」',
+    { on: { destroyed: function (G, p, z, m) { push(G, { k: 'hogAsk', d: { p: ownerOf(p, m), u: m.c.u } }); },
+      battleWin: function (G, p) { draw(G, p, 1); log(G, G.P[p].nick + ' 抽1张卡'); } } });
+  S('gld', '金锭交易', 'n', '从卡组将1张猪族卡加入手牌，然后丢弃1张手牌。', { set: '猪族', lim: 2, sp: {
+    acts: onField(function (G, p) { return hasDeck(G, p, { set: '猪族' }); }),
+    run: function (G, p) { job(G, 'discAsk', p, { tx: '金锭交易：选择要丢弃的1张手牌' }); job(G, 'jSrch', p, { set: '猪族', tx: '选择1张猪族卡加入手牌' }); } } });
+  S('bst', '堡垒遗迹', 'fd', '场地：①自己的猪族怪兽攻击力+200。\n②每回合1次，自己的猪族怪兽被战斗破坏时：从卡组将1只猪族怪兽加入手牌。', Object.assign({ set: '猪族' }, fd({
+    aura: { atk: function (G, owner, p, z, m) { return owner === p && HOG(C[m.c.id]) ? 200 : 0; } },
+    lost: function (G, p, m) { if (HOG(C[m.c.id]) && opt(G, p, 'bst')) job(G, 'jSrch', p, { k: 'm', set: '猪族', tx: '堡垒遗迹：选择1只猪族怪兽' }); } })));
+  T('pgr', '猪族之怒', 'atk', '对手怪兽攻击自己的猪族怪兽时：破坏攻击怪兽，自己受到300伤害。', { set: '猪族', tr: {
+    cond: function (G, q, info) { var m = info.tz >= 0 && G.P[q].mz[info.tz]; return !!m && m.up && HOG(C[m.c.id]) && !immuneTrap(G, info.p, info.z); },
+    run: function (G, q, info) { destroy(G, info.p, info.z, 'eff'); damage(G, q, 300); return true; } } });
+  M('pgw', '猪族战团长', 6, 2400, 1800, 'l', '猪族', '猪族 + 猪族\n①合成召唤成功时：从自己墓地特殊召唤1只3星以下猪族怪兽（守备表示）。\n②自己场上其他猪族怪兽攻击力+200。',
+    { x: 1, rc: [{ r: '猪族' }, { r: '猪族' }], aura: { atk: function (G, owner, p, z, m) { return owner === p && HOG(C[m.c.id]) ? 200 : 0; } },
+      on: { summon: function (G, p, z, how) { if (how === 'c') job(G, 'jSsGy', p, { set: '猪族', lv: 3, pos: 'd', tx: '战团长：选择要复活的猪族' }); } } });
+  M('plr', '熔岩猪骑', 5, 2300, 1500, 'l', '猪族', '红石召唤：星级合计5\n①红石召唤成功时：从自己墓地将1张猪族卡加入手牌。\n②攻击守备表示怪兽时，造成贯穿伤害。',
+    { x: 1, rs: 1, pi: 1, on: { summon: function (G, p, z, how) { if (how === 'rs') job(G, 'jGyHand', p, { set: '猪族', tx: '选择1张猪族卡回收' }); } } });
+
+  /* --- The End: the ender chest as a resource --- */
+  M('enw', '末地游荡者', 3, 1200, 800, 'v', '末地', '①召唤·特殊召唤成功时（每回合1次）：将卡组1张末地卡送去墓地。\n②封存墓地的这张卡：从卡组将1只「末地游荡者」以外的末地怪兽加入手牌。',
+    { on: { summon: function (G, p) { if (opt(G, p, 'enw')) job(G, 'jToGy', p, { set: '末地', tx: '选择1张末地卡送去墓地' }); } },
+      gy: gyIf(function (G, p) { return hasDeck(G, p, { k: 'm', set: '末地', ex: 'enw' }); }, function (G, p) { job(G, 'jSrch', p, { k: 'm', set: '末地', ex: 'enw', tx: '选择1只末地怪兽' }); }, '从卡组检索1只末地怪兽') });
+  M('cfr', '紫颂果精', 2, 600, 600, 'v', '末地', '①被送去墓地时（每回合1次）：从卡组将1张末地魔法·陷阱卡加入手牌。\n②被封存时（每回合1次）：抽1张卡。',
+    { on: { toGrave: function (G, p) { if (opt(G, p, 'cfr')) job(G, 'jSrch', p, { k: 'st', set: '末地', tx: '选择1张末地魔法·陷阱卡' }); },
+      banished: function (G, p) { if (opt(G, p, 'cfrb')) { draw(G, p, 1); log(G, G.P[p].nick + ' 抽1张卡'); } } } });
+  M('vmt', '虚空螨', 1, 300, 300, 'v', '末地', '调整。\n①封存墓地的这张卡：从墓地特殊召唤1只「虚空螨」以外的末地怪兽（守备表示）。',
+    { tun: 1,
+      gy: gyIf(function (G, p) { return freeM(G.P[p]) >= 0 && G.P[p].grave.some(function (g) { var d = C[g.id]; return d.k === 'm' && END(d) && d.id !== 'vmt' && !d.nsum; }); },
+        function (G, p) { job(G, 'jSsGy', p, { set: '末地', ex: 'vmt', pos: 'd', tx: '选择要复活的末地怪兽' }); }, '从墓地复活1只末地怪兽（守备）') });
+  M('ecg', '末地城守卫', 4, 1500, 1500, 'v', '末地', '①自己末影箱每有1张卡，这张卡攻击力+100（最多+1000）。\n②召唤·特殊召唤成功时（每回合1次）：封存对手墓地1张卡。',
+    { mod: { atk: function (G, p) { return Math.min(1000, 100 * G.P[p].ban.length); } },
+      on: { summon: function (G, p) { if (opt(G, p, 'ecg')) job(G, 'jBanOpp', p, {}); } } });
+  M('esd', '终界飘影', 4, 1400, 1400, 'v', '末地', '①每回合1次：封存自己墓地最早的2张卡，破坏对手场上1张魔法·陷阱卡（包括场地和事件）。\n②被效果破坏时：从卡组将1张末地魔法·陷阱卡加入手牌。',
+    { ign: { acts: function (G, p, z, m, A) { if (G.P[p].grave.length >= 2) stTargets(G, 1 - p).forEach(function (tg) { A.push({ t: 'ef', z: z, tg: tg }); }); },
+      run: function (G, p, z, a) { if (!stCard(G, 1 - p, a.tg)) return; banOld(G, p, 2); removeST(G, 1 - p, a.tg[0], a.tg[1]); },
+      ds: function (G, p, a) { return '封存墓地2张：破坏 ' + stLabel(G, 1 - p, a.tg); } },
+      on: { effDestroyed: function (G, p) { job(G, 'jSrch', p, { k: 'st', set: '末地', tx: '选择1张末地魔法·陷阱卡' }); } } });
+  M('edr', '终界巨龙', 8, 3000, 2500, 'v', '末地', '①可以封存自己墓地最早的5张卡，从手牌特殊召唤这张卡（每回合1次）；这个方法特殊召唤的回合不能攻击。\n②召唤·特殊召唤成功时：可以封存对手场上1张魔法·陷阱卡（包括场地和事件）。',
+    { hnd: { ssp: 1, acts: function (G, p, h, A) { if (freeM(G.P[p]) >= 0 && G.P[p].grave.length >= 5) A.push({ t: 'he', h: h }); },
+      cost: function (G, p, a, c) { banOld(G, p, 5); return { u: c.u }; },
+      run: function (G, p, a, cap) { var f = freeM(G.P[p]); summonFromHand(G, p, cap.u, 's', posOf(a)); if (f >= 0 && G.P[p].mz[f] && G.P[p].mz[f].c.u === cap.u) G.P[p].mz[f].na = G.turn; }, ds: '封存墓地5张，特殊召唤这张卡' },
+      on: { summon: function (G, p) { job(G, 'jZone', p, { q: 1 - p, ban: 1, tx: '终界巨龙：选择要封存的魔法·陷阱卡' }); } } });
+  S('epo', '末地传送门', 'fd', '场地：①自己的末地怪兽攻击力+200。\n②每回合1次：封存1张手牌，从卡组将1张末地卡加入手牌。', Object.assign({ set: '末地' }, fd({
+    aura: { atk: function (G, owner, p, z, m) { return owner === p && END(C[m.c.id]) ? 200 : 0; } },
+    ign: { acts: function (G, p, A) { if (!hasDeck(G, p, { set: '末地' })) return; G.P[p].hand.forEach(function (c, h) { A.push({ t: 'fe', h: h }); }); },
+      run: function (G, p, a) { var P = G.P[p], c = P.hand.splice(a.h, 1)[0]; log(G, P.nick + ' 将 ' + nm(c) + ' 封存进末影箱'); banish(G, p, c); job(G, 'jSrch', p, { set: '末地', tx: '选择1张末地卡' }); },
+      ds: function (G, p, a) { return '封存 ' + C[G.P[p].hand[a.h].id].n + '，检索1张末地卡'; } } })));
+  S('dbr', '龙息', 'n', '封存对手墓地最新的最多3张卡，每封存1张给予对手200伤害；自己末影箱有5张以上时改为每张400。', { set: '末地', sp: {
+    acts: onField(function (G, p) { return G.P[1 - p].grave.length > 0; }),
+    run: function (G, p) { var O = G.P[1 - p], n = 0, per = G.P[p].ban.length >= 5 ? 400 : 200; while (n < 3 && O.grave.length) { banish(G, 1 - p, O.grave.pop()); n++; } log(G, '龙息吞没了 ' + n + ' 张卡'); damage(G, 1 - p, n * per); } } });
+  T('vrf', '虚空裂隙', 'sum', '对手特殊召唤怪兽时：封存该怪兽。', { set: '末地', tr: {
+    cond: function (G, q, info) { return info.how !== 'n' && info.how !== 'f' && !immuneTrap(G, info.p, info.z); },
+    run: function (G, q, info) { if (G.P[info.p].mz[info.z]) banMon(G, info.p, info.z); return true; } } });
+  M('eek', '附魔·末影骑士', 4, 2500, 2000, 'v', '末地', '附魔召唤：2只4星怪兽\n①去掉1层经验：封存对手场上1张卡。\n②自己末影箱有5张以上时，这张卡不会被战斗破坏。',
+    { x: 1, en: 4, ign: { acts: function (G, p, z, m, A) {
+        if (!m.xyz || !m.xyz.length) return;
+        G.P[1 - p].mz.forEach(function (o, i) { if (o) A.push({ t: 'ef', z: z, tg: ['m', i] }); });
+        stTargets(G, 1 - p).forEach(function (tg) { A.push({ t: 'ef', z: z, tg: tg }); });
+      }, run: function (G, p, z, a) { detach(G, p, z); if (a.tg[0] === 'm') { if (G.P[1 - p].mz[a.tg[1]]) banMon(G, 1 - p, a.tg[1]); } else removeST(G, 1 - p, a.tg[0], a.tg[1], true); },
+      ds: function (G, p, a) { var O = G.P[1 - p]; return '去掉1层经验：封存 ' + (a.tg[0] === 'm' ? (O.mz[a.tg[1]] && O.mz[a.tg[1]].up ? C[O.mz[a.tg[1]].c.id].n : '盖放的怪兽') : stLabel(G, 1 - p, a.tg)); } },
+      on: { preDestroy: function (G, p, z, m, why) { return why === 'battle' && G.P[p].ban.length >= 5; } } });
+  M('elo', '终界之主', 10, 3400, 3000, 'v', '末地', '终界巨龙 + 末地怪兽\n①这张卡攻击力+自己末影箱张数×100（最多+1500）。\n②不会被效果破坏。',
+    { x: 1, rc: [{ id: 'edr' }, { r: '末地' }], mod: { atk: function (G, p) { return Math.min(1500, 100 * G.P[p].ban.length); } },
+      on: { preDestroy: function (G, p, z, m, why) { return why !== 'battle'; } } });
+
+  /* --- Players: community jokes, precise searching --- */
+  M('pnb', '新手玩家', 1, 100, 100, 'g', '玩家', '①召唤·特殊召唤成功时（每回合1次）：从卡组将1张「工作台」或玩家魔法·陷阱卡加入手牌。\n②被战斗破坏时：抽1张卡。\n「第一步：空手撸树。」',
+    { on: { summon: function (G, p) { if (opt(G, p, 'pnb')) job(G, 'jSrch', p, { any: [{ id: 'wb' }, { k: 'st', set: '玩家' }], tx: '选择「工作台」或1张玩家魔法·陷阱卡' }); },
+      battleDestroyed: function (G, p) { draw(G, p, 1); log(G, G.P[p].nick + ' 抽1张卡（死了就重来）'); } } });
+  M('psr', '速通者', 3, 1300, 600, 'g', '玩家', '①通常召唤成功时（每回合1次）：从卡组将1只「速通者」以外的玩家怪兽加入手牌。\n②每回合1次：支付500生命值，翻开卡组顶3张，选1张加入手牌，其余放回卡组底。\n「这运气，绝对开了吧？」',
+    { on: { summon: function (G, p, z, how) { if (onlyNS(how) && opt(G, p, 'psr')) job(G, 'jSrch', p, { k: 'm', set: '玩家', ex: 'psr', tx: '选择1只玩家怪兽' }); } },
+      ign: { acts: function (G, p, z, m, A) { if (G.P[p].deck.length && G.P[p].lp > 500) A.push({ t: 'ef', z: z }); },
+        run: function (G, p) { G.P[p].lp -= 500; fx(G, { k: 'dmg', p: p, v: 500 }); var P = G.P[p], n = Math.min(3, P.deck.length);
+          choose(G, p, 'card', uniq(P.deck.slice(-n).map(function (c) { return c.id; })).sort(), '欧皇时刻：从卡组顶3张中选1张', 'digRes', { p: p, n: n }); },
+        ds: '支付500：翻卡组顶3张，选1张加入手牌' } });
+  M('pbd', '建筑大师', 4, 1200, 1800, 'g', '玩家', '①召唤·特殊召唤成功时（每回合1次）：从自己墓地将1张魔法卡加入手牌。\n②每回合1次：丢弃1张手牌，从卡组将1张场地魔法卡加入手牌。',
+    { on: { summon: function (G, p) { if (opt(G, p, 'pbd')) job(G, 'jGyHand', p, { k: 's', tx: '选择1张魔法卡回收' }); } },
+      ign: { acts: function (G, p, z, m, A) { if (hasDeck(G, p, { sub: 'fd' })) G.P[p].hand.forEach(function (c, h) { A.push({ t: 'ef', z: z, h: h }); }); },
+        run: function (G, p, z, a) { var P = G.P[p], c = P.hand.splice(a.h, 1)[0]; if (!c) return; log(G, P.nick + ' 丢弃 ' + nm(c)); toGrave(G, p, c, 'h'); job(G, 'jSrch', p, { sub: 'fd', tx: '选择1张场地魔法卡' }); },
+        ds: function (G, p, a) { return '丢弃 ' + C[G.P[p].hand[a.h].id].n + '，检索1张场地魔法'; } } });
+  M('prd', '红石大佬', 4, 1400, 1200, 'r', '玩家', '调整。\n①召唤·特殊召唤成功时（每回合1次）：从卡组特殊召唤1只2星以下红石属性怪兽（守备表示）。',
+    { tun: 1, on: { summon: function (G, p) { if (opt(G, p, 'prd')) job(G, 'jSsDk', p, { at: 'r', lv: 2, pos: 'd', tx: '选择1只2星以下红石怪兽' }); } } });
+  M('pak', '挂机玩家', 2, 0, 2000, 'g', '玩家', '①这张卡不能攻击；守备表示时不会被战斗破坏。\n②自己回合结束时：将自己卡组顶1张送去墓地，获得1绿宝石。\n「人在，但没完全在。」',
+    { noAtk: 1, on: { preDestroy: function (G, p, z, m, why) { if (why !== 'battle' || m.pos !== 'd') return false; log(G, '挂机玩家纹丝不动'); return true; },
+      turnEnd: function (G, q) { if (G.cur !== q) return; mill(G, q, 1); gainEm(G, q, 1); } } });
+  M('pfs', '钓鱼佬', 3, 900, 900, 'o', '玩家', '①每回合1次：抽1张卡，然后丢弃1张手牌。\n②被送去墓地时（每回合1次）：将自己卡组顶1张送去墓地。\n「空军了，再来一竿。」',
+    { ign: { acts: function (G, p, z, m, A) { if (G.P[p].deck.length) A.push({ t: 'ef', z: z }); },
+        run: function (G, p) { draw(G, p, 1); log(G, G.P[p].nick + ' 钓上来1张卡'); job(G, 'discAsk', p, { tx: '钓鱼佬：选择要丢弃的1张手牌' }); }, ds: '抽1张，然后丢弃1张' },
+      on: { toGrave: function (G, p) { if (opt(G, p, 'pfs')) mill(G, p, 1); } } });
+  M('phc', '硬核玩家', 5, 2200, 1000, 'm', '玩家', '①自己生命值2000以下时，这张卡攻击力+1000。\n②被战斗破坏时，改为封存这张卡（只有一条命）。',
+    { mod: { atk: function (G, p) { return G.P[p].lp <= 2000 ? 1000 : 0; } },
+      on: { battleDestroyed: function (G, p, z, m) { var o = G.P[ownerOf(p, m)], i = findU(o.grave, m.c.u); if (i >= 0) { banish(G, ownerOf(p, m), o.grave.splice(i, 1)[0]); log(G, '硬核玩家只有一条命'); } } } });
+  M('hbn', '白瞳幽影', 6, 2400, 2000, 'v', '玩家', '不能通常召唤。自己墓地有3只以上玩家怪兽时，可以从手牌特殊召唤（每回合1次）。\n①要被破坏时（每局1次），改为封存这张卡；下个自己回合开始时，从末影箱特殊召唤回场。\n「已在本次更新中移除。」',
+    { nsum: 1, selfSS: function (G, p) { return G.P[p].grave.filter(function (c) { var d = C[c.id]; return d.k === 'm' && PLY(d); }).length >= 3; },
+      on: { preDestroy: function (G, p, z, m) { var o = ownerOf(p, m); if (G.P[o].hbX) return false; G.P[o].hbX = 1; G.P[p].mz[z] = null; cleanupEquips(G, p); m.c.rt = G.turn; banish(G, o, m.c); log(G, '白瞳幽影消失了……「已移除」'); fx(G, { k: 'die', p: p, z: z, id: m.c.id }); return true; } },
+      banStart: function (G, q, c) { if (G.cur === q && c.rt && c.rt < G.turn) push(G, { k: 'hbRet', d: { p: q, u: c.u } }); } });
+  M('cjk', '鸡骑士', 3, 1400, 400, 'g', '野兽', '①自己场上有「方块鸡」时，可以从手牌特殊召唤（每回合1次）。\n②通常召唤成功时（每回合1次）：从卡组将1只「方块鸡」加入手牌。\n③自己场上有「方块鸡」时，这张卡攻击力+400，可以直接攻击。\n「鸡骑士！」',
+    { selfSS: function (G, p) { return upOn(G, p, function (d) { return d.id === 'chk'; }); }, dirf: function (G, p) { return upOn(G, p, function (d) { return d.id === 'chk'; }); },
+      mod: { atk: function (G, p) { return upOn(G, p, function (d) { return d.id === 'chk'; }) ? 400 : 0; } },
+      on: { summon: function (G, p, z, how) { if (onlyNS(how) && opt(G, p, 'cjk')) job(G, 'jSrch', p, { id: 'chk', tx: '选择「方块鸡」' }); } } });
+  S('dig', '直着往下挖', 'n', '抽2张卡。然后有1/3的概率掉进岩浆：受到800伤害。\n「老玩家都说过不要这样挖。」', { set: '玩家', lim: 1, sp: {
+    acts: onField(function (G, p) { return G.P[p].deck.length >= 2; }),
+    run: function (G, p) { draw(G, p, 2); log(G, G.P[p].nick + ' 抽2张'); if (rnd(G, 3) === 0) { log(G, '脚下一空……掉进了岩浆！'); fx(G, { k: 'lava', p: p }); damage(G, p, 800); } else log(G, '运气不错，没挖到岩浆'); } } });
+  S('srv', '多人服务器', 'fd', '场地：①自己的玩家怪兽攻击力+200。\n②每回合1次，自己召唤·特殊召唤玩家怪兽时：从卡组将1只不同名的玩家怪兽送去墓地。', Object.assign({ set: '玩家' }, fd({
+    aura: { atk: function (G, owner, p, z, m) { return owner === p && PLY(C[m.c.id]) ? 200 : 0; } },
+    summon: function (G, owner, z) { var m = G.P[owner].mz[z]; if (!m || !PLY(C[m.c.id]) || !hasDeck(G, owner, { k: 'm', set: '玩家', ex: m.c.id }) || !opt(G, owner, 'srv')) return; job(G, 'jToGy', owner, { k: 'm', set: '玩家', ex: m.c.id, tx: '服务器：选择1只玩家怪兽送去墓地' }); } })));
+  T('igdz', '刻意的游戏设计', 'atk', '对手怪兽宣言攻击时：床爆炸了！破坏场上所有怪兽，双方各受到500伤害。\n「这是刻意的游戏设计。」', { lim: 1, tr: {
+    run: function (G, q) { log(G, '床爆炸了！'); fx(G, { k: 'boom' }); [0, 1].forEach(function (s) { for (var i = 0; i < 3; i++) if (G.P[s].mz[i] && !immuneTrap(G, s, i)) destroy(G, s, i, 'eff'); }); damage(G, 0, 500); damage(G, 1, 500); return true; } } });
+  T('mlg', '落地水', 'atk', '对手怪兽直接攻击时：这次战斗你受到的伤害为0，然后可以从手牌特殊召唤1只4星以下怪兽（守备表示）。', { tr: {
+    cond: function (G, q, info) { return info.tz < 0; },
+    run: function (G, q, info) { info.noDmg = true; log(G, '落地水！稳稳接住'); job(G, 'jSsHand', q, { lv: 4, pos: 'd', opt: 1, tx: '落地水：可以特殊召唤1只4星以下怪兽' }); return false; } } });
+  M('pbt', '建筑团队', 6, 2200, 2200, 'g', '玩家', '玩家 + 玩家\n①合成召唤成功时：从卡组将1张场地魔法卡加入手牌。\n②自己场上有场地魔法时，这张卡不会被效果破坏。',
+    { x: 1, rc: [{ r: '玩家' }, { r: '玩家' }], on: { summon: function (G, p, z, how) { if (how === 'c') job(G, 'jSrch', p, { sub: 'fd', tx: '选择1张场地魔法卡' }); },
+      preDestroy: function (G, p, z, m, why) { return why !== 'battle' && !!G.P[p].fz; } } });
+  M('pif', '全自动刷铁机', 6, 2300, 2000, 'r', '机械', '红石召唤：星级合计6\n①自己回合结束时，如果自己场上没有「刷出的铁傀儡」，特殊召唤1只「刷出的铁傀儡」衍生物（1200/1500）。',
+    { x: 1, rs: 1, on: { turnEnd: function (G, q) { var P = G.P[q], f = freeM(P); if (G.cur !== q || f < 0 || P.mz.some(function (m) { return m && m.c.id === 'itk'; })) return; token(G, q, f, 'itk'); log(G, '刷铁机产出了一只铁傀儡'); } } });
+  M('psk', '附魔·速通王者', 3, 2300, 1000, 'g', '玩家', '附魔召唤：2只3星怪兽\n①每回合1次，去掉1层经验：从卡组将1张卡加入手牌。',
+    { x: 1, en: 3, ign: { acts: function (G, p, z, m, A) { if (m.xyz && m.xyz.length && G.P[p].deck.length) A.push({ t: 'ef', z: z }); },
+      run: function (G, p, z) { detach(G, p, z); job(G, 'jSrch', p, { tx: '速通路线：选择1张卡加入手牌' }); }, ds: '去掉1层经验：从卡组检索任意1张卡' } });
+  M('itk', '刷出的铁傀儡', 2, 1200, 1500, 'g', '构造体', '衍生物（刷铁机）。', { tok: 1 });
+
+  /* --- Generic tools: removal of face-up spells, effect negation, graveyard fuel --- */
+  S('slk', '精准采集', 'n', '破坏对手场上1张魔法·陷阱卡（包括场地和事件）。如果破坏的是表侧表示的卡，抽1张卡。', { lim: 2, hold: 520, sp: {
+    acts: function (G, p, h, A) { stTargets(G, 1 - p).forEach(function (tg) { A.push({ t: 'sp', h: h, tg: tg }); }); },
+    prep: function (G, p, a) { var c = stCard(G, 1 - p, a.tg); return { u: c ? c.u : 0 }; },
+    run: function (G, p, a, cap) { var c = stCard(G, 1 - p, a.tg); if (!c || c.u !== cap.u) return; var r = removeST(G, 1 - p, a.tg[0], a.tg[1]); if (r && r.up) { draw(G, p, 1); log(G, G.P[p].nick + ' 抽1张卡'); } },
+    ds: function (G, p, a) { return '破坏 ' + stLabel(G, 1 - p, a.tg); } } });
+  S('scf', '灵魂营火', 'n', '封存自己墓地最早的最多2只怪兽，抽相同数量的卡。', { lim: 1, sp: {
+    acts: onField(function (G, p) { return G.P[p].grave.some(function (c) { return C[c.id].k === 'm'; }); }),
+    run: function (G, p) { var P = G.P[p], n = 0; for (var i = 0; i < P.grave.length && n < 2;) { if (C[P.grave[i].id].k === 'm') { banish(G, p, P.grave.splice(i, 1)[0]); n++; } else i++; } log(G, P.nick + ' 在营火边封存了 ' + n + ' 只怪兽，抽' + n + '张'); draw(G, p, n); } } });
+  S('ech', '末影箱', 'n', '从卡组选择1张卡封存。下个自己回合开始时，把那张卡加入手牌。', { lim: 1, sp: {
+    acts: onField(function (G, p) { return G.P[p].deck.length > 0; }),
+    run: function (G, p) { choose(G, p, 'card', uniq(deckIds(G, p)).sort(), '末影箱：选择要存起来的卡', 'echRes', { p: p }); } } });
+  T('rcb', '红石断路', 'eff', '对手发动怪兽效果（场上、手牌或墓地）时：无效该效果；如果那只怪兽在场上，把它破坏。', { tr: {
+    cond: function (G, q, info) { return !(info.src === 'm' && immuneTrap(G, info.p, info.z)); },
+    run: function (G, q, info) { log(G, '红石信号被切断了'); if (info.src === 'm' && G.P[info.p].mz[info.z]) destroy(G, info.p, info.z, 'eff'); return true; } } });
+  T('lfl', '熔岩倒灌', 'spl', '对手发动魔法卡时：破坏对手场上其他所有表侧表示的魔法·陷阱卡（包括场地和事件）。', { lim: 1, tr: {
+    cond: function (G, q) { return stTargets(G, 1 - q, true).length > 0; },
+    run: function (G, q, info) { var p = 1 - q; stTargets(G, p, true).forEach(function (tg) { if (!(tg[0] === 's' && tg[1] === info.sz)) removeST(G, p, tg[0], tg[1]); }); cleanupEquips(G, p); return false; } } });
+
+  /* --- Bridges into the v2 decks --- */
+  M('lib', '图书管理员', 3, 1000, 1200, 'g', '村民', '①召唤·特殊召唤成功时（每回合1次）：从卡组将1只「图书管理员」以外的村民怪兽加入手牌。\n②封存墓地的这张卡：从墓地将1张装备魔法加入手牌。',
+    { on: { summon: function (G, p) { if (opt(G, p, 'lib')) job(G, 'jSrch', p, { k: 'm', set: '村民', ex: 'lib', tx: '选择1只村民怪兽' }); } },
+      gy: gyIf(function (G, p) { return hasGrave(G, p, { sub: 'eq' }); }, function (G, p) { job(G, 'jGyHand', p, { sub: 'eq', tx: '选择1张装备魔法回收' }); }, '从墓地回收1张装备魔法') });
+  M('bnp', '骷髅骨堆', 2, 500, 400, 'm', '亡灵', '①被送去墓地时（每回合1次）：将自己卡组顶2张送去墓地。\n②封存墓地的这张卡：从墓地特殊召唤1只「骷髅骨堆」以外的4星以下亡灵怪兽（守备表示）。',
+    { on: { toGrave: function (G, p) { if (opt(G, p, 'bnp')) mill(G, p, 2); } },
+      gy: gyIf(function (G, p) { return freeM(G.P[p]) >= 0 && hasGrave(G, p, { k: 'm', set: '亡灵', lv: 4, ex: 'bnp' }); },
+        function (G, p) { job(G, 'jSsGy', p, { set: '亡灵', lv: 4, ex: 'bnp', pos: 'd', tx: '选择要复活的亡灵' }); }, '从墓地复活1只4星以下亡灵（守备）') });
+  S('obsd', '黑曜石', 'n', '从卡组或墓地将1只「黑曜石巨龙」或熔岩属性怪兽加入手牌。', { lim: 2, sp: {
+    acts: onField(function (G, p) { var s = { any: [{ id: 'obd' }, { k: 'm', at: 'l' }] }; return hasDeck(G, p, s) || hasGrave(G, p, s); }),
+    run: function (G, p) { var f = pr({ any: [{ id: 'obd' }, { k: 'm', at: 'l' }] }), P = G.P[p];
+      var ids = uniq(deckIds(G, p).filter(function (id) { return f(C[id]); }).concat(P.grave.filter(function (c) { return f(C[c.id]); }).map(function (c) { return c.id; }))).sort();
+      choose(G, p, 'card', ids, '选择1只加入手牌（卡组优先）', 'dkOrGyRes', { p: p }); } } });
+  S('rhn', '劫掠号角', 'n', '从卡组特殊召唤1只4星以下劫掠族怪兽（守备表示）。', { lim: 2, sp: {
+    acts: onField(function (G, p) { return freeM(G.P[p]) >= 0 && hasDeck(G, p, { k: 'm', set: '劫掠', lv: 4 }); }),
+    run: function (G, p) { job(G, 'jSsDk', p, { set: '劫掠', lv: 4, pos: 'd', tx: '选择要特殊召唤的劫掠族' }); } } });
+  S('hos', '海洋之心', 'n', '从卡组将1张「海底神殿」「潮涌核心」或「三叉戟」加入手牌，然后回复300生命值。', { sp: {
+    acts: onField(function (G, p) { return hasDeck(G, p, { id: ['mon', 'cdt', 'tri'] }); }),
+    run: function (G, p) { heal(G, p, 300); job(G, 'jSrch', p, { id: ['mon', 'cdt', 'tri'], tx: '选择1张加入手牌' }); } } });
+  M('spt', '黏性活塞', 2, 500, 500, 'r', '机械', '调整。\n①通常召唤成功时：可以把对手场上1只表侧攻击表示怪兽变为守备表示。\n②封存墓地的这张卡：从墓地特殊召唤1只调整以外的红石属性怪兽（守备表示）。',
+    { tun: 1, on: { summon: function (G, p, z, how) { if (onlyNS(how)) job(G, 'jPos', p, {}); } },
+      gy: gyIf(function (G, p) { return freeM(G.P[p]) >= 0 && hasGrave(G, p, { k: 'm', at: 'r', nt: 1 }); },
+        function (G, p) { job(G, 'jSsGy', p, { at: 'r', nt: 1, pos: 'd', tx: '选择要复活的红石怪兽' }); }, '从墓地复活1只红石怪兽（守备）') });
+  S('tsp', '试炼刷怪笼', 'n', '从卡组将1只试炼怪兽加入手牌。', { lim: 2, sp: {
+    acts: onField(function (G, p) { return hasDeck(G, p, { tr: 1 }); }), run: function (G, p) { job(G, 'jSrch', p, { tr: 1, tx: '选择1只试炼怪兽' }); } } });
+  M('enx', '附魔·冥火骷髅', 3, 2200, 1600, 'm', '亡灵', '附魔召唤：2只3星怪兽\n①去掉1层经验：从自己墓地特殊召唤1只4星以下亡灵怪兽。\n②夜晚时不会被效果破坏。',
+    { x: 1, en: 3, ign: { acts: function (G, p, z, m, A) { if (m.xyz && m.xyz.length && freeM(G.P[p]) >= 0 && hasGrave(G, p, { k: 'm', set: '亡灵', lv: 4 })) A.push({ t: 'ef', z: z }); },
+      run: function (G, p, z) { detach(G, p, z); job(G, 'jSsGy', p, { set: '亡灵', lv: 4, tx: '选择要复活的亡灵' }); }, ds: '去掉1层经验：从墓地复活1只亡灵' },
+      on: { preDestroy: function (G, p, z, m, why) { return why !== 'battle' && isNight(G); } } });
+  M('tmr', '交易大师', 6, 2000, 2200, 'g', '村民', '村民 + 村民\n①合成召唤成功时：获得2绿宝石。\n②每回合1次：支付2绿宝石，从卡组将1张卡加入手牌。',
+    { x: 1, rc: [{ r: '村民' }, { r: '村民' }], on: { summon: function (G, p, z, how) { if (how === 'c') gainEm(G, p, 2); } },
+      ign: { acts: function (G, p, z, m, A) { if (G.P[p].em >= 2 && G.P[p].deck.length) A.push({ t: 'ef', z: z }); },
+        run: function (G, p) { G.P[p].em -= 2; log(G, G.P[p].nick + ' 支付2绿宝石'); job(G, 'jSrch', p, { tx: '交易：选择1张卡加入手牌' }); }, ds: '支付2绿宝石：从卡组检索任意1张卡' } });
+
+  var EXTRA = ['dgo', 'wrd', 'zkg', 'skg', 'lvd', 'rsn', 'rpr', 'rcr', 'fly', 'rmg', 'esh', 'eds', 'elk', 'pgw', 'plr', 'eek', 'elo', 'pbt', 'pif', 'psk', 'enx', 'tmr'];
   var DECKS = {
     A: { n: '草原牧场', tx: '村民与傀儡稳扎稳打，绿宝石交易找野兽，合成钻石傀儡和狼骑士。',
-      c: ['wlf', 'wlf', 'wlf', 'pig', 'cow', 'min', 'min', 'smi', 'shp', 'shp', 'stg', 'stg', 'dkn', 'igd', 'wb', 'wb', 'dsw', 'wht', 'vil', 'tnt', 'tnt', 'cac', 'sand', 'web'] },
+      c: ['wlf', 'wlf', 'chk', 'cjk', 'pig', 'cow', 'min', 'min', 'lib', 'lib', 'smi', 'shp', 'shp', 'stg', 'dkn', 'igd', 'wb', 'wb', 'dsw', 'wht', 'vil', 'tnt', 'tnt', 'cac', 'rcb'] },
     B: { n: '亡灵矿洞', tx: '僵尸打不死，刷怪笼源源不断，夜晚更强，附魔台叠放暗影刺客，尸潮之王带队复活。',
-      c: ['zom', 'zom', 'zom', 'skl', 'skl', 'spd', 'spd', 'sli', 'sli', 'shk', 'abw', 'spw', 'enc', 'tot', 'wb', 'wb', 'tnt', 'fur', 'mine', 'moon', 'cac', 'pst', 'bar'] },
+      c: ['zom', 'zom', 'zom', 'skl', 'skl', 'spd', 'spd', 'bnp', 'bnp', 'sli', 'shk', 'abw', 'spw', 'enc', 'tot', 'wb', 'wb', 'tnt', 'fur', 'mine', 'moon', 'cac', 'pst', 'bar'] },
     C: { n: '熔岩虚空', tx: '熔岩块和火焰精灵铺场烧血，献祭召唤黑曜石巨龙，合成熔岩黑曜龙一击制胜。',
-      c: ['lsl', 'lsl', 'mgc', 'mgc', 'fsp', 'fsp', 'sli', 'vwk', 'vwk', 'dkn', 'lgo', 'lgo', 'obd', 'obd', 'min', 'ebk', 'enc', 'nfr', 'tnt', 'tnt', 'lav', 'wb', 'prs', 'cac'] },
+      c: ['lsl', 'lsl', 'mgc', 'mgc', 'fsp', 'fsp', 'sli', 'vwk', 'vwk', 'dkn', 'lgo', 'lgo', 'obd', 'obd', 'obsd', 'obsd', 'ebk', 'enc', 'nfr', 'tnt', 'tnt', 'slk', 'wb', 'prs', 'cac'] },
     D: { n: '劫掠者', tx: '林地府邸里铺满衍生物，不祥之兆召来三波劫掠，对手清不掉就输。',
-      c: ['pil', 'pil', 'rxb', 'rxb', 'rxb', 'axe', 'axe', 'rcp', 'rcp', 'evk', 'evk', 'rav', 'flag', 'omen', 'omen', 'wman', 'wman', 'vpl', 'tot', 'tnt', 'tnt', 'cac', 'sand'] },
+      c: ['pil', 'pil', 'rxb', 'rxb', 'rxb', 'axe', 'axe', 'rcp', 'rcp', 'evk', 'evk', 'rav', 'flag', 'omen', 'omen', 'wman', 'wman', 'rhn', 'rhn', 'tot', 'tnt', 'tnt', 'cac', 'sand'] },
     E: { n: '深海', tx: '海底神殿防守反击，巨鳞鱼让攻击者疲惫，三叉戟武装溺水者。',
-      c: ['dol', 'dol', 'dol', 'tur', 'tur', 'puf', 'puf', 'sqd', 'drw', 'drw', 'elg', 'elg', 'slt', 'cdt', 'tri', 'tri', 'mon', 'mon', 'strm', 'bar', 'tnt', 'web', 'sgl', 'scs'] },
+      c: ['dol', 'dol', 'dol', 'tur', 'tur', 'puf', 'puf', 'sqd', 'drw', 'drw', 'elg', 'elg', 'slt', 'cdt', 'tri', 'tri', 'mon', 'mon', 'hos', 'strm', 'bar', 'tnt', 'web', 'scs'] },
     F: { n: '红石机械', tx: '调整加素材，星级相加红石召唤；矿车铺场，飞行器直击，巨构清场。',
-      c: ['rep', 'rep', 'rep', 'cmp', 'cmp', 'hop', 'hop', 'hop', 'obs', 'mcr', 'mcr', 'dsp', 'dsp', 'pgl', 'pgl', 'scg', 'rtc', 'rtc', 'tnt', 'tnt', 'dpc', 'wtr', 'bar', 'trd'] },
+      c: ['rep', 'rep', 'rep', 'cmp', 'cmp', 'hop', 'hop', 'hop', 'prd', 'mcr', 'mcr', 'dsp', 'dsp', 'pgl', 'spt', 'spt', 'scg', 'rtc', 'rtc', 'tnt', 'tnt', 'dpc', 'bar', 'trd'] },
     G: { n: '试炼', tx: '试炼钥匙召唤旋风使者和铜甲巨人，重锤下落重击，打赢战斗开宝库。',
-      c: ['brs', 'brs', 'brs', 'bog', 'bog', 'cpg', 'cpg', 'skl', 'min', 'min', 'stg', 'brz', 'brz', 'cgi', 'cgi', 'tkey', 'tkey', 'tkey', 'okey', 'mac', 'wch', 'tch', 'tch', 'tnt', 'bed', 'otri', 'web'] }
+      c: ['brs', 'brs', 'brs', 'bog', 'bog', 'cpg', 'cpg', 'skl', 'min', 'min', 'stg', 'brz', 'brz', 'cgi', 'cgi', 'tkey', 'tkey', 'tsp', 'okey', 'mac', 'wch', 'tch', 'tch', 'tnt', 'bed', 'otri', 'web'] },
+    H: { n: '下界猪族', tx: '斥候检索、萌崽进墓拉人、金锭交易边找边丢；猪皇倒下还能站起来，战团长带队冲锋。',
+      c: ['pgs', 'pgs', 'pgs', 'pgm', 'pgm', 'pgk', 'pgk', 'sand', 'pgb', 'pgb', 'pgz', 'pgz', 'phk', 'phk', 'gld', 'gld', 'bst', 'pgr', 'wb', 'tnt', 'slk', 'cac', 'gap', 'web'] },
+    I: { n: '末地', tx: '把卡送去墓地再封存进末影箱：游荡者和虚空螨轮转资源，末影箱越满城卫越强，巨龙从手牌直接降临。',
+      c: ['enw', 'enw', 'enw', 'cfr', 'cfr', 'vmt', 'vmt', 'vmt', 'ecg', 'ecg', 'esd', 'esd', 'edr', 'edr', 'epo', 'epo', 'dbr', 'dbr', 'vrf', 'vrf', 'enc', 'wb', 'scf', 'tnt'] },
+    J: { n: '玩家', tx: '新手、速通者、建筑大师互相检索，服务器把队友送进墓地，凑够三个就召唤白瞳幽影。',
+      c: ['pnb', 'pnb', 'pnb', 'psr', 'psr', 'psr', 'pbd', 'pbd', 'prd', 'pak', 'pfs', 'pfs', 'phc', 'hbn', 'dig', 'srv', 'srv', 'mlg', 'gap', 'igdz', 'wb', 'wb', 'enc', 'tnt'] }
   };
 
   function lim(id) { return C[id].lim || 3; }
@@ -946,7 +1217,7 @@ var E = (function () {
      opt.dn: day/night cycle. */
   function newGame(seed, decks, nicks, opt) {
     opt = opt || {};
-    var G = { v: 2, rs: typeof seed === 'number' ? seed | 0 : hashStr(String(seed)), uid: 1, turn: 1, cur: 0, phase: 'main1', ns: false,
+    var G = { v: 3, rs: typeof seed === 'number' ? seed | 0 : hashStr(String(seed)), uid: 1, turn: 1, cur: 0, phase: 'main1', ns: false,
       n: 0, winner: -1, why: '', log: [], fx: [], P: [], stack: [], ask: null, dno: 0, moon: 0,
       opt: { autoTrap: opt.autoTrap !== false, dn: opt.dn !== false } };
     for (var p = 0; p < 2; p++) {
@@ -954,7 +1225,7 @@ var E = (function () {
       for (var i = deck.length - 1; i > 0; i--) { var j = rnd(G, i + 1); var t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
       G.P.push({ nick: (nicks && nicks[p]) || ('玩家' + (p + 1)), lp: K.lp, deck: deck, hand: [], grave: [],
         extra: EXTRA.map(function (id) { return { u: G.uid++, id: id }; }), mz: [null, null, null], sz: [null, null, null],
-        fz: null, ez: null, em: 0, xp: 0, sk: 0, obs: 0, torch: 0, fe: 0, wt: 0, vt: 0 });
+        fz: null, ez: null, em: 0, xp: 0, sk: 0, obs: 0, torch: 0, fe: 0, wt: 0, vt: 0, ban: [], gyT: {}, heT: {} });
     }
     G.cur = rnd(G, 2); G.first = G.cur;
     /* opening hands; the second player gets K.second2 extra cards */
@@ -986,11 +1257,19 @@ var E = (function () {
     }
     eachSource(G, 'turnStart', function (f, q) { f(G, q); });
     [0, 1].forEach(function (q) { var Z = G.P[q].ez; if (Z && C[Z.c.id].ev.start) C[Z.c.id].ev.start(G, q, Z); });
+    /* ender chest: delayed returns */
+    [0, 1].forEach(function (q) {
+      var Q = G.P[q];
+      Q.ban.slice().forEach(function (c) {
+        if (c.ec && q === G.cur && c.ec < G.turn) { Q.ban.splice(findU(Q.ban, c.u), 1); delete c.ec; Q.hand.push(c); log(G, Q.nick + ' 从末影箱取出了 ' + nm(c)); }
+        else if (C[c.id].banStart) C[c.id].banStart(G, q, c);
+      });
+    });
   }
   /* End of turn: discard to 7, end-of-turn effects (may ask), then the turn passes (task 'turnSwap'). */
   function endTurn(G) {
     var P = G.P[G.cur], p = G.cur;
-    while (P.hand.length > 7) { var c = P.hand.pop(); P.grave.push(c); log(G, P.nick + ' 手牌超过7张，丢弃 ' + nm(c)); }
+    while (P.hand.length > 7) { var c = P.hand.pop(); log(G, P.nick + ' 手牌超过7张，丢弃 ' + nm(c)); toGrave(G, p, c, 'h'); }
     push(G, { k: 'turnSwap', d: {} });
     /* ominous key: trial monster returns to hand */
     P.mz.forEach(function (m, z) { if (m && m.ok) { bounce(G, p, z); } });
@@ -1001,6 +1280,7 @@ var E = (function () {
       if (n) { log(G, '阳光灼烧着亡灵'); fx(G, { k: 'sun', p: p }); damage(G, p, K.sunBurn * n); }
     }
     eachSource(G, 'turnEnd', function (f, q) { f(G, q); });
+    [0, 1].forEach(function (q) { G.P[q].mz.forEach(function (m, z) { if (m && m.up) { var d = C[m.c.id]; if (d.on && d.on.turnEnd) d.on.turnEnd(G, q, z, m); } }); });
     [0, 1].forEach(function (q) {
       var Z = G.P[q].ez; if (!Z) return; var ev = C[Z.c.id].ev;
       if (ev.end) ev.end(G, q, Z);
@@ -1102,7 +1382,7 @@ var E = (function () {
     obsRes: function (G, t) { if (t.r === null) return; G.P[t.d.p].obs = 1; summonFromHand(G, t.d.p, t.r, 's'); },
     spellRes: function (G, t) {
       var p = t.d.p, P = G.P[p], sz = t.d.sz, c = sz >= 0 ? P.sz[sz].c : t.d.c, d = C[c.id];
-      if (t.r && C[t.r].tr.run(G, 1 - p, {})) { if (sz >= 0) P.sz[sz] = null; P.grave.push(c); log(G, d.n + ' 被屏障方块挡下了'); return; }
+      if (t.r && C[t.r].tr.run(G, 1 - p, { id: t.d.c ? t.d.c.id : null, sz: sz })) { if (sz >= 0) P.sz[sz] = null; P.grave.push(c); log(G, d.n + ' 被屏障方块挡下了'); return; }
       if (d.sub === 'fd') {
         if (P.fz) { P.grave.push(P.fz.c); }
         P.fz = { c: c, st: G.turn, n: 0 }; log(G, P.nick + ' 发动场地：' + d.n); fx(G, { k: 'field', p: p, id: d.id });
@@ -1162,7 +1442,7 @@ var E = (function () {
       if (!t.r) return; var P = G.P[t.d.p];
       for (var i = P.grave.length - 1; i >= 0; i--) if (P.grave[i].id === t.r) { var c = P.grave.splice(i, 1)[0]; P.hand.push(c); log(G, P.nick + ' 回收了 ' + nm(c)); return; }
     },
-    handSumRes: function (G, t) { if (t.r !== null && t.r !== undefined) summonFromHand(G, t.d.p, t.r, 's'); },
+    handSumRes: function (G, t) { if (t.r !== null && t.r !== undefined) summonFromHand(G, t.d.p, t.r, 's', t.d.pos); },
     bounceRes: function (G, t) { if (t.r && G.P[t.r[0]].mz[t.r[1]]) bounce(G, t.r[0], t.r[1]); },
     killRes: function (G, t) { if (t.r && G.P[t.r[0]].mz[t.r[1]]) destroy(G, t.r[0], t.r[1], 'eff'); },
     boltRes: function (G, t) { if (t.r && G.P[t.r[0]].mz[t.r[1]]) { log(G, '雷击命中了 ' + nm(G.P[t.r[0]].mz[t.r[1]].c)); fx(G, { k: 'boltHit', p: t.r[0], z: t.r[1] }); destroy(G, t.r[0], t.r[1], 'eff'); } },
@@ -1174,7 +1454,77 @@ var E = (function () {
       if (t.d.q >= 0) choose(G, t.d.q, 'mz', all, '三叉戟：选择雷击的目标', 'boltRes', {});
       else push(G, { k: 'boltRes', d: {}, r: all[rnd(G, all.length)] });
     },
-    turnSwap: function (G) { turnSwap(G); }
+    turnSwap: function (G) { turnSwap(G); },
+    /* --- v3 --- */
+    tgRes: function (G, t) { var P = G.P[t.d.p], i = findU(P.grave, t.d.u); if (i >= 0) C[P.grave[i].id].on.toGrave(G, t.d.p, P.grave[i], t.d.from); },
+    banT: function (G, t) { var P = G.P[t.d.p], i = findU(P.ban, t.d.u); if (i >= 0) C[P.ban[i].id].on.banished(G, t.d.p, P.ban[i]); },
+    jSrch: function (G, t) { search(G, t.d.p, pr(t.d), t.d.tx || '选择1张卡加入手牌'); },
+    jToGy: function (G, t) { var f = pr(t.d); choose(G, t.d.p, 'card', uniq(deckIds(G, t.d.p).filter(function (id) { return f(C[id]); })).sort(), t.d.tx || '选择1张卡送去墓地', 'dkGyRes', { p: t.d.p }); },
+    jSsDk: function (G, t) {
+      if (freeM(G.P[t.d.p]) < 0) return; var f = pr(Object.assign({ k: 'm' }, t.d));
+      choose(G, t.d.p, 'card', uniq(deckIds(G, t.d.p).filter(function (id) { return f(C[id]) && !C[id].nsum; })).sort(), t.d.tx || '选择要特殊召唤的怪兽', 'ssDkRes', { p: t.d.p, pos: t.d.pos || 'a' });
+    },
+    jSsGy: function (G, t) {
+      if (freeM(G.P[t.d.p]) < 0) return; var f = pr(Object.assign({ k: 'm' }, t.d));
+      choose(G, t.d.p, 'card', uniq(G.P[t.d.p].grave.filter(function (c) { return f(C[c.id]) && !C[c.id].nsum; }).map(function (c) { return c.id; })).sort(), t.d.tx || '选择要复活的怪兽', 'ssGyRes', { p: t.d.p, pos: t.d.pos || 'a' });
+    },
+    jSsHand: function (G, t) {
+      if (freeM(G.P[t.d.p]) < 0) return; var f = pr(Object.assign({ k: 'm' }, t.d));
+      choose(G, t.d.p, 'hand', G.P[t.d.p].hand.filter(function (c) { return f(C[c.id]) && !C[c.id].nsum; }).map(function (c) { return c.u; }), t.d.tx || '选择要特殊召唤的怪兽', 'handSumRes', { p: t.d.p, pos: t.d.pos || 'a' }, !!t.d.opt);
+    },
+    jGyHand: function (G, t) { var f = pr(t.d); choose(G, t.d.p, 'card', uniq(G.P[t.d.p].grave.filter(function (c) { return f(C[c.id]); }).map(function (c) { return c.id; })).sort(), t.d.tx || '选择1张卡回收', 'graveRes', { p: t.d.p }); },
+    jBanOpp: function (G, t) { var q = 1 - t.d.p; choose(G, t.d.p, 'card', uniq(G.P[q].grave.map(function (c) { return c.id; })).sort(), '选择对手墓地中要封存的卡', 'banGyRes', { q: q }); },
+    jZone: function (G, t) { var o = stTargets(G, t.d.q).map(function (tg) { return [t.d.q, tg[0], tg[1]]; }); choose(G, t.d.p, 'zone', o, t.d.tx || '选择1张魔法·陷阱卡', 'zoneRes', { ban: t.d.ban }, true); },
+    jPos: function (G, t) { choose(G, t.d.p, 'mz', monsZ(G, 1 - t.d.p, function (m) { return m.up && m.pos === 'a'; }), '黏性活塞：选择变为守备表示的怪兽', 'posRes', {}, true); },
+    posRes: function (G, t) { if (!t.r) return; var m = G.P[t.r[0]].mz[t.r[1]]; if (m) { m.pos = 'd'; log(G, nm(m.c) + ' 被拉成守备表示'); } },
+    dkGyRes: function (G, t) { if (!t.r) return; var c = takeDeck(G, t.d.p, t.r); if (c) { log(G, nm(c) + ' 从卡组送去墓地'); toGrave(G, t.d.p, c, 'd'); } },
+    ssDkRes: function (G, t) {
+      if (!t.r) return; var p = t.d.p, P = G.P[p], f = freeM(P); if (f < 0) return; var c = takeDeck(G, p, t.r); if (!c) return;
+      place(G, p, f, c, t.d.pos, true, 's'); log(G, P.nick + ' 从卡组特殊召唤 ' + nm(c)); summoned(G, p, f, 's');
+    },
+    ssGyRes: function (G, t) {
+      if (!t.r) return; var p = t.d.p, P = G.P[p], f = freeM(P); if (f < 0) return;
+      for (var i = P.grave.length - 1; i >= 0; i--) if (P.grave[i].id === t.r) { var c = P.grave.splice(i, 1)[0]; place(G, p, f, c, t.d.pos, true, 's'); log(G, P.nick + ' 从墓地特殊召唤 ' + nm(c)); summoned(G, p, f, 's'); return; }
+    },
+    dkOrGyRes: function (G, t) {
+      if (!t.r) return; var P = G.P[t.d.p], c = takeDeck(G, t.d.p, t.r);
+      if (!c) for (var i = P.grave.length - 1; i >= 0; i--) if (P.grave[i].id === t.r) { c = P.grave.splice(i, 1)[0]; break; }
+      if (c) { P.hand.push(c); log(G, P.nick + ' 将 ' + nm(c) + ' 加入手牌'); }
+    },
+    discAsk: function (G, t) { choose(G, t.d.p, 'hand', G.P[t.d.p].hand.map(function (c) { return c.u; }), t.d.tx || '选择要丢弃的1张手牌', 'discRes', { p: t.d.p }); },
+    discRes: function (G, t) { var P = G.P[t.d.p], c = removeHand(P, t.r); if (c) { log(G, P.nick + ' 丢弃 ' + nm(c)); toGrave(G, t.d.p, c, 'h'); } },
+    banGyRes: function (G, t) { if (!t.r) return; var O = G.P[t.d.q]; for (var i = O.grave.length - 1; i >= 0; i--) if (O.grave[i].id === t.r) { var c = O.grave.splice(i, 1)[0]; banish(G, t.d.q, c); log(G, nm(c) + ' 被封存进末影箱'); return; } },
+    zoneRes: function (G, t) { if (t.r) removeST(G, t.r[0], t.r[1], t.r[2], t.d.ban); },
+    digRes: function (G, t) {
+      var P = G.P[t.d.p], top = P.deck.splice(P.deck.length - t.d.n, t.d.n), k = -1;
+      for (var i = top.length - 1; i >= 0; i--) if (top[i].id === t.r) { k = i; break; }
+      if (k >= 0) { var c = top.splice(k, 1)[0]; P.hand.push(c); dkOut(P, c.id); log(G, P.nick + ' 将 ' + nm(c) + ' 加入手牌'); }
+      for (var j = 0; j < top.length; j++) P.deck.unshift(top[j]);
+    },
+    echRes: function (G, t) { var c = takeDeck(G, t.d.p, t.r); if (!c) return; c.ec = G.turn; banish(G, t.d.p, c); log(G, G.P[t.d.p].nick + ' 把1张卡放进了末影箱'); },
+    hbRet: function (G, t) {
+      var p = t.d.p, P = G.P[p], i = findU(P.ban, t.d.u), f = freeM(P); if (i < 0 || f < 0) return;
+      var c = P.ban.splice(i, 1)[0]; delete c.rt; place(G, p, f, c, 'a', true, 's'); log(G, '白瞳幽影又出现了……'); summoned(G, p, f, 's');
+    },
+    hogAsk: function (G, t) {
+      var P = G.P[t.d.p]; if (P.hogT === G.turn || freeM(P) < 0 || findU(P.grave, t.d.u) < 0) return;
+      if (P.grave.filter(function (c) { return c.u !== t.d.u; }).length < 2) return;
+      choose(G, t.d.p, 'yn', [t.d.u], '猪皇：封存墓地最早的2张卡，让猪皇站起来？', 'hogRes', { p: t.d.p }, true);
+    },
+    hogRes: function (G, t) {
+      if (t.r === null || t.r === undefined) return; var p = t.d.p, P = G.P[p]; P.hogT = G.turn; banOld(G, p, 2, t.r);
+      var i = findU(P.grave, t.r), f = freeM(P); if (i < 0 || f < 0) return;
+      var c = P.grave.splice(i, 1)[0]; place(G, p, f, c, 'a', true, 's'); log(G, '猪皇永不陨落！'); fx(G, { k: 'hog', p: p }); summoned(G, p, f, 's');
+    },
+    /* activated monster effects resolve after the opponent's 'eff' response window */
+    efRes: function (G, t) {
+      var p = t.d.p, a = t.d.a;
+      if (t.r && C[t.r].tr.run(G, 1 - p, { p: p, z: a.z, src: 'm' })) { log(G, '效果被无效了'); return; }
+      var m = G.P[p].mz[a.z]; if (!m || m.c.u !== t.d.u) return;
+      var ig = C[m.c.id].ign; (Array.isArray(ig) ? ig[a.e] : ig).run(G, p, a.z, a);
+    },
+    gyRes: function (G, t) { if (t.r && C[t.r].tr.run(G, 1 - t.d.p, { p: t.d.p, z: -1, src: 'gy' })) { log(G, '效果被无效了'); return; } C[t.d.id].gy.run(G, t.d.p, t.d.a); },
+    heRes: function (G, t) { if (t.r && C[t.r].tr.run(G, 1 - t.d.p, { p: t.d.p, z: -1, src: 'h' })) { log(G, '效果被无效了'); return; } C[t.d.id].hnd.run(G, t.d.p, t.d.a, t.d.cap); }
   };
   function battleWin(G, p, z) {
     var m = G.P[p].mz[z], d = m && C[m.c.id];
@@ -1201,7 +1551,7 @@ var E = (function () {
   /* Redstone summons: one face-up tuner plus face-up non-tuners whose levels sum to the target level. */
   function redstoneActs(G, p, A) {
     var P = G.P[p], ups = [];
-    P.mz.forEach(function (m, z) { if (m && m.up && !C[m.c.id].hid && !C[m.c.id].notr) ups.push(z); });
+    P.mz.forEach(function (m, z) { if (m && m.up && !C[m.c.id].hid && !C[m.c.id].notr && !m.nm) ups.push(z); });
     if (ups.length < 2) return;
     ups.forEach(function (tz) {
       var tm = P.mz[tz]; if (!isTuner(G, p, tm)) return;
@@ -1227,6 +1577,15 @@ var E = (function () {
     });
   }
 
+  function posAble(G, p, a) {
+    var P = G.P[p];
+    if (a.t === 'ss') return !C[P.hand[a.h].id].ssPos;
+    if (a.t === 'rs' || a.t === 'xs') return true;
+    if (a.t === 'sp') return !!C[P.hand[a.h].id].ssp;
+    if (a.t === 'he') return !!C[P.hand[a.h].id].hnd.ssp;
+    if (a.t === 'gy') return !!C[P.grave[a.i].id].gy.ssp;
+    return false;
+  }
   function legal(G) {
     var A = []; if (G.winner >= 0) return A;
     if (G.ask) { for (var k = 0; k < G.ask.opts.length; k++) A.push({ t: 'ans', i: k }); return A; }
@@ -1256,17 +1615,26 @@ var E = (function () {
       if (freeM(P) >= 0) P.hand.forEach(function (c, h) { var d = C[c.id]; if (d.selfSS && P.ssd !== G.turn && d.selfSS(G, p)) A.push({ t: 'ss', h: h }); });
       redstoneActs(G, p, A);
       enchantActs(G, p, A);
-      P.mz.forEach(function (m, z) { if (m && m.up && m.ef !== G.turn) { var ig = C[m.c.id].ign; if (ig) ig.acts(G, p, z, m, A); } });
+      P.mz.forEach(function (m, z) {
+        if (!m || !m.up) return; var ig = C[m.c.id].ign; if (!ig) return;
+        if (!Array.isArray(ig)) { if (m.ef !== G.turn) ig.acts(G, p, z, m, A); return; }
+        ig.forEach(function (e, ei) { if (m.efs && m.efs[ei] === G.turn) return; var B = []; e.acts(G, p, z, m, B); B.forEach(function (a) { a.e = ei; A.push(a); }); });
+      });
+      P.hand.forEach(function (c, h) { var d = C[c.id]; if (d.hnd && P.heT[c.id] !== G.turn) d.hnd.acts(G, p, h, A); });
+      var gseen = {};
+      P.grave.forEach(function (c, i) { var d = C[c.id]; if (!d.gy || gseen[c.id] || P.gyT[c.id] === G.turn) return; gseen[c.id] = 1; d.gy.acts(G, p, i, c, A); });
       var F = fieldDef(G, p); if (F && F.fd.ign && P.fe !== G.turn) F.fd.ign.acts(G, p, A);
       if (eventOn(G, 'wtr') && P.em >= 1 && P.wt !== G.turn && P.deck.length) A.push({ t: 'wt' });
     }
     if (G.phase === 'battle') P.mz.forEach(function (m, z) {
       if (!m || !m.up || m.pos !== 'a') return;
-      var d = C[m.c.id]; if (m.at >= attacksOf(G, p, m)) return;
+      var d = C[m.c.id]; if (d.noAtk || m.na === G.turn || m.at >= attacksOf(G, p, m)) return;
       var any = false;
       O.mz.forEach(function (o, tz) { if (o) { any = true; A.push({ t: 'at', z: z, tz: tz }); } });
-      if (!any || d.dir || m.dr === G.turn) A.push({ t: 'at', z: z, tz: -1 });
+      if (!any || d.dir || (d.dirf && d.dirf(G, p)) || m.dr === G.turn) A.push({ t: 'at', z: z, tz: -1 });
     });
+    /* special summons that leave the position open get a defence-position twin {..., d: 1} */
+    if (main) { var tw = []; A.forEach(function (a) { if (posAble(G, p, a)) tw.push(Object.assign({}, a, { d: 1 })); }); A.push.apply(A, tw); }
     if (G.phase === 'main1' && G.turn > 1) A.push({ t: 'bp' });
     if (G.phase === 'battle') A.push({ t: 'm2' });
     A.push({ t: 'end' });
@@ -1282,7 +1650,7 @@ var E = (function () {
     if (d.sub !== 'fd' && d.sub !== 'ev') { sz = freeS(P); P.sz[sz] = { c: c, up: true, st: G.turn, eq: 0 }; }
     log(G, P.nick + ' 发动魔法：' + d.n); fx(G, { k: 'spell', p: p, id: d.id });
     sculk(G, 1 - p);
-    trapWindow(G, 1 - p, 'spl', { id: d.id }, 'spellRes', { p: p, a: a, cap: cap, sz: sz, c: sz < 0 ? c : null });
+    trapWindow(G, 1 - p, 'spl', { id: d.id, sz: sz }, 'spellRes', { p: p, a: a, cap: cap, sz: sz, c: sz < 0 ? c : null });
   }
   function doAct(G, a) {
     var p = G.cur, P = G.P[p];
@@ -1315,7 +1683,7 @@ var E = (function () {
         var names = mats.map(function (id) { return C[id].n; }).join(' + ');
         a.m.forEach(function (z, i) { leave(G, p, z, 'grave'); fx(G, { k: 'die', p: p, z: z, id: mats[i] }); });
         P.extra.splice(a.x, 1);
-        var f2 = freeM(P); place(G, p, f2, x, 'a', true, 'rs');
+        var f2 = freeM(P); place(G, p, f2, x, posOf(a), true, 'rs');
         log(G, P.nick + ' 红石召唤 ' + nm(x) + '（' + names + '）'); fx(G, { k: 'redstone', p: p, z: f2, m: a.m, lv: C[x.id].lv });
         mats.forEach(function (id) { if (C[id].on && C[id].on.asMat) push(G, { k: 'matRes', d: { p: p, id: id } }); });
         summoned(G, p, f2, 'rs');
@@ -1325,20 +1693,36 @@ var E = (function () {
         var x2 = P.extra[a.x], layers = a.m.map(function (z) { var mm = P.mz[z]; P.mz[z] = null; return mm.c; });
         cleanupEquips(G, p);
         P.extra.splice(a.x, 1);
-        var f3 = freeM(P), nm3 = place(G, p, f3, x2, 'a', true, 'x'); nm3.xyz = layers;
+        var f3 = freeM(P), nm3 = place(G, p, f3, x2, posOf(a), true, 'x'); nm3.xyz = layers;
         log(G, P.nick + ' 附魔召唤 ' + nm(x2)); fx(G, { k: 'enchant', p: p, z: f3, m: a.m });
         summoned(G, p, f3, 'x');
         break;
       }
       case 'ef': {
-        var me = P.mz[a.z]; me.ef = G.turn;
+        var me = P.mz[a.z];
+        if (Array.isArray(C[me.c.id].ign)) { me.efs = me.efs || {}; me.efs[a.e] = G.turn; } else me.ef = G.turn;
         log(G, nm(me.c) + ' 发动效果'); fx(G, { k: 'eff', p: p, z: a.z });
         sculk(G, 1 - p);
-        C[me.c.id].ign.run(G, p, a.z, a);
+        trapWindow(G, 1 - p, 'eff', { p: p, z: a.z, src: 'm', id: me.c.id }, 'efRes', { p: p, a: a, u: me.c.u });
+        break;
+      }
+      case 'gy': {
+        var gc = P.grave[a.i]; P.gyT[gc.id] = G.turn; P.grave.splice(a.i, 1); banish(G, p, gc);
+        log(G, P.nick + ' 封存墓地的 ' + nm(gc) + '，发动效果'); fx(G, { k: 'eff', p: p, gy: gc.id });
+        sculk(G, 1 - p);
+        trapWindow(G, 1 - p, 'eff', { p: p, z: -1, src: 'gy', id: gc.id }, 'gyRes', { p: p, a: a, id: gc.id });
+        break;
+      }
+      case 'he': {
+        var hc = P.hand[a.h], hd = C[hc.id].hnd; P.heT[hc.id] = G.turn;
+        var hcap = hd.cost ? hd.cost(G, p, a, hc) : { u: hc.u };
+        log(G, P.nick + ' 发动手牌中 ' + nm(hc) + ' 的效果'); fx(G, { k: 'eff', p: p });
+        sculk(G, 1 - p);
+        trapWindow(G, 1 - p, 'eff', { p: p, z: -1, src: 'h', id: hc.id }, 'heRes', { p: p, a: a, id: hc.id, cap: hcap });
         break;
       }
       case 'fe': { P.fe = G.turn; fx(G, { k: 'eff', p: p, f: 1 }); sculk(G, 1 - p); C[P.fz.c.id].fd.ign.run(G, p, a); break; }
-      case 'ss': { P.ssd = G.turn; summonFromHand(G, p, P.hand[a.h].u, 's'); break; }
+      case 'ss': { P.ssd = G.turn; var sd = C[P.hand[a.h].id], sf = freeM(P); summonFromHand(G, p, P.hand[a.h].u, 's', sd.ssPos || posOf(a)); if (sd.ssNoMat && P.mz[sf]) P.mz[sf].nm = 1; break; }
       case 'wt': { P.wt = G.turn; P.em--; log(G, P.nick + ' 用1绿宝石向流浪商人买了1张卡'); draw(G, p, 1); break; }
       case 'at': {
         var A = P.mz[a.z], D0 = a.tz >= 0 ? G.P[1 - p].mz[a.tz] : null;
@@ -1387,7 +1771,7 @@ var E = (function () {
 
   return { C: C, K: K, ATTR: ATTR, EXTRA: EXTRA, DECKS: DECKS, lim: lim, deckable: deckable, validDeck: validDeck, hashStr: hashStr,
     newGame: newGame, legal: legal, apply: apply, actor: actor, atkOf: atkOf, defOf: defOf, fog: fog, clone: clone, key: key,
-    isNight: isNight, fieldId: fieldId };
+    isNight: isNight, fieldId: fieldId, isSet: isSet, stCard: stCard };
 })();
 
 /* AI: in-turn beam search on a fogged copy of the state. Each decision re-plans the rest of the turn
@@ -1627,7 +2011,64 @@ var SPR = {
   moon: ['xxxxxxxx', 'xxfffxxx', 'xffffffx', 'xffffffx', 'xffffffx', 'xxffffxx', 'xxxxxxxx', 'xwxxxwxx'],
   /* --- v2 traps --- */
   trd: ['b......b', 'b......b', 'blllllll', 'b......b', 'b......b', 'b......b', 'b......b', 'bbbbbbbb'],
-  scs: ['........', '........', '..hhhh..', '.hHHHHh.', 'hHhhhhHh', 'hhhhhhhh', 'hHhHHhHh', 'hhhhhhhh']
+  scs: ['........', '........', '..hhhh..', '.hHHHHh.', 'hHhhhhHh', 'hhhhhhhh', 'hHhHHhHh', 'hhhhhhhh'],
+  /* --- v3: nether hogs --- */
+  pgs: ['..yyyy..', '.pppppp.', '.pkppkp.', '.ppPPpp.', '..pPPp..', '.bbbbbb.', 'b.bbbb.b', '..b..b..'],
+  pgb: ['..SSSS..', '.pppppp.', '.pkppkp.', '.pPkkPp.', 'SSSSSSSs', '.SSSSSSs', '.SSSSS.y', '.S...S..'],
+  pgm: ['..BBBB..', '.pppppp.', '.pkppkp.', '.ppPPpp.', '.yyyyyy.', 'yyAyyAyy', '.yyyyyy.', '..b..b..'],
+  pgk: ['........', '........', '..pppp..', '.pkppkp.', '.pPPPPp.', '.pppppp.', '..p..p..', '........'],
+  pgz: ['r......r', '.pppppp.', 'rpkppkpr', '.pPPPPp.', '.pPkkPp.', 'dddddddd', '.d.dd.d.', '.d....d.'],
+  phk: ['y.y..y.y', 'yyyyyyyy', 'pkppppkp', 'pppPPppp', 'pPkPPkPp', '.pppppp.', '.dyyyyd.', '.d....d.'],
+  gld: ['........', '........', '..yyyy..', '.yffffy.', 'yyyyyyyy', 'yAyyyyAy', '.AAAAAA.', '........'],
+  bst: ['jjjjjjjj', 'jSjjjjSj', 'jjyjjyjj', 'j......j', 'jj.jj.jj', 'jSjjjjSj', 'jjjyyjjj', 'jjjjjjjj'],
+  pgr: ['r......r', '.rpppr..', 'pppppppp', 'pkkppkkp', 'pppPPppp', 'ppPkkPpp', '.pppppp.', 'r......r'],
+  pgw: ['.yyyyyy.', 'ySyyyySy', '.pppppp.', 'pkppppkp', 'pPPkkPPp', 'SSSSSSSS', 'ySSSSSSy', '.S....S.'],
+  plr: ['.pppp...', 'pkppkp..', '.pPPp...', 'oooooooo', 'oryooyro', 'oooooooo', '.o.oo.o.', '.r.rr.r.'],
+  /* --- v3: the End --- */
+  enw: ['..jjjj..', '.jjjjjj.', '.jvjjvj.', '.jjjjjj.', '..jjjj..', '..jjjj..', '..j..j..', '..j..j..'],
+  cfr: ['...vv...', '..vVVv..', '.vVvvVv.', '..vVVv..', '...vv...', '...vv...', '.v.vv.v.', '..vvvv..'],
+  vmt: ['........', '........', '..vVVv..', '.vVvvVv.', 'VvVvvVvV', '.v.vv.v.', '........', '........'],
+  ecg: ['ffffffff', 'fvvvvvvf', 'fvkvvkvf', 'fvvvvvvf', 'fVVVVVVf', 'fvvvvvvf', 'ffvffvff', '.f....f.'],
+  esd: ['........', '.vv..vv.', 'vVVvvVVv', 'vVkVVkVv', '.vVVVVv.', '..vVVv..', '...vv...', '....v...'],
+  edr: ['j......j', 'jj....jj', '.jjjjjj.', 'jjvjjvjj', 'jjjjjjjj', '.jjVVjj.', '..jjjj..', '.jj..jj.'],
+  epo: ['ffffffff', 'fjjjjjjf', 'fjvjjvjf', 'fjjxxjjf', 'fjjxxjjf', 'fjvjjvjf', 'fjjjjjjf', 'ffffffff'],
+  dbr: ['...ll...', '...ll...', '..vvvv..', '.vVvvVv.', '.vvPvvv.', '.vVvvVv.', '..vvvv..', '........'],
+  vrf: ['jjjjjjjj', 'jjjvvjjj', 'jjvVVvjj', 'jvVkkVvj', 'jvVkkVvj', 'jjvVVvjj', 'jjjvvjjj', 'jjjjjjjj'],
+  eek: ['..vvvv..', '.vVVVVv.', '.vkVVkv.', '..vVVv..', 'lvvvvvvl', '.vVvvVv.', '..v..v..', '..V..V..'],
+  elo: ['y.y..y.y', 'yyyyyyyy', 'jjvjjvjj', 'jjjjjjjj', 'vjjjjjjv', '.jjVVjj.', 'jj.jj.jj', 'j..jj..j'],
+  /* --- v3: players --- */
+  pnb: ['..BBBB..', '.BnnnnB.', '.nknnkn.', '..nnnn..', '.cccccc.', 'n.cccc.n', '..uuuu..', '..u..u..'],
+  psr: ['..gggg..', '.gGGGGg.', '.GnknkG.', '.gnnnng.', '.gggggg.', 'g.gggg.c', '..uuuu..', '.u....u.'],
+  pbd: ['.yyyyyy.', '..nnnn..', '.nknnkn.', '..nnnn..', '.aaaaaa.', 'b.aaaa.s', '..uuuu..', '..u..u..'],
+  prd: ['..rrrr..', '.rnnnnr.', '.nknnkn.', '..nnnn..', '.rrrrrr.', 'r.rrrr.r', '..uuuu..', '..u..u..'],
+  pak: ['.....w.w', '......w.', '..ssss..', '.snnnns.', '.nkknkk.', '..nnnn..', '.ssssss.', '.s....s.'],
+  pfs: ['..bbbb..', '..nnnn.b', '.nknnknb', '..nnnn.b', '.cccccc.', 'n.cccc.l', '..uuuu.l', '..u..uuu'],
+  phc: ['r.r..r.r', 'rrrrrrrr', '.rr..rr.', '..nnnn..', '.nknnkn.', '.SSSSSS.', '..SSSS..', '..S..S..'],
+  hbn: ['..BBBB..', '.BnnnnB.', '.nwnnwn.', '..nnnn..', '.cccccc.', 'n.cccc.n', '..uuuu..', '..u..u..'],
+  cjk: ['...gg...', '..gkkg..', '...gg...', '..vvvv..', '.wwwwww.', 'wkwwwwow', '.wwwwww.', '..y..y..'],
+  dig: ['ssssssss', 'sss..sss', 'sss..sss', 'sss..sss', 'sss..sss', 'sss..sss', 'ooo..ooo', 'oyoooooy'],
+  srv: ['SSSSSSSS', 'SmmSkkkS', 'SSSSSSSS', 'SmmSkkkS', 'SSSSSSSS', 'SmmSkkkS', 'SSSSSSSS', '.S....S.'],
+  igdz: ['..y..o..', '.o.yo.y.', 'y.oyyo.o', '.oywwyo.', 'wwrrrrrr', 'wwrrrrrr', 'bbbbbbbb', 'b......b'],
+  mlg: ['........', '.l....l.', '.llllll.', '.luuuul.', '.luccul.', '..llll..', '...cc...', '..cccc..'],
+  pbt: ['yy....yy', 'nn....nn', 'kn....kn', 'bbbbbbbb', 'bBbBbBbB', 'aaaaaaaa', 'u.u..u.u', 'u.u..u.u'],
+  pif: ['llllllll', 'lsllllsl', 'lskllksl', 'llllllll', 'rrrrrrrr', 'lrllllrl', 'lrllllrl', 'ssssssss'],
+  psk: ['y.y..y.y', 'yyyyyyyy', '.gggggg.', '.GnknkG.', '.gggggg.', 'g.gggg.c', '..uuuu..', '.u....u.'],
+  itk: ['........', '.llllll.', '.lkllkl.', '.llssll.', 'llllllll', '.llllll.', '.l....l.', '........'],
+  /* --- v3: generic tools and bridges --- */
+  slk: ['.cccccc.', 'c..bb..c', '...bb...', '...bb...', '...bb...', '...bb...', '...bb...', '...BB...'],
+  scf: ['........', '...cc...', '..cHHc..', '.cHccHc.', '..cHHc..', 'bbbbbbbb', 'BbBbBbBb', 'bbbbbbbb'],
+  ech: ['jjjjjjjj', 'jVVVVVVj', 'jVVVVVVj', 'jjjqqjjj', 'jVVqqVVj', 'jVVVVVVj', 'jVVVVVVj', 'jjjjjjjj'],
+  rcb: ['r......r', '.r....r.', 'rrr..rrr', '...ss...', '...ss...', 'rrr..rrr', '.r....r.', 'r......r'],
+  lfl: ['oooooooo', 'oyoooyoo', 'oooooooo', 'rorroror', 'oooooooo', 'ssosssos', 'ssssosss', 'ssssssss'],
+  lib: ['..wwww..', '.wnnnnw.', '.nknnkn.', '..nnnn..', '.wwwwww.', 'vwwwwwwv', '.vwwwwv.', '..v..v..'],
+  bnp: ['........', '........', '..l..l..', '.lllll..', '..l.lll.', '.llllll.', 'lllwllll', 'llllllll'],
+  obsd: ['jjjjjjjj', 'jVjjjjVj', 'jjjVjjjj', 'jjjjjVjj', 'jVjjjjjj', 'jjjjVjjj', 'jjVjjjVj', 'jjjjjjjj'],
+  rhn: ['........', '......bb', '.....bbB', '...bbbB.', '.bbbbB..', 'bwbbB...', '.bbB....', '........'],
+  hos: ['........', '..qqqq..', '.qhHHhq.', 'qhHccHhq', 'qhHccHhq', '.qhHHhq.', '..qqqq..', '........'],
+  spt: ['gggggggg', 'gGggggGg', 'sssllsss', 'sSSllSSs', 'sSSllSSs', 'sSSSSSSs', 'sSSSSSSs', 'ssssssss'],
+  tsp: ['aaaaaaaa', 'aA.aa.Aa', 'a..oo..a', 'a.oyyo.a', 'a.oyyo.a', 'a..oo..a', 'aA.aa.Aa', 'aaaaaaaa'],
+  enx: ['..SSSS..', '.SkSSkS.', '.SSSSSS.', '..SkkS..', '.vSSSSv.', 'v.SSSS.v', '..SSSS..', '..S..S..'],
+  tmr: ['..mmmm..', '.mnnnnm.', '.nknnkn.', '..nnnn..', '.bbbbbb.', 'mbbbbbbm', '.bbbbbb.', '..b..b..']
 };
 var ART = {};
 function art(id) {
@@ -2245,7 +2686,7 @@ var RAR = (function () {
   Object.keys(E.DECKS).forEach(function (k) { var seen = {}; E.DECKS[k].c.forEach(function (id) { if (!seen[id]) { seen[id] = 1; n[id] = (n[id] || 0) + 1; } }); });
   Object.keys(C).forEach(function (id) {
     var d = C[id]; if (d.tok || d.hid || d.k === 'x') return;
-    if (d.x || d.trial || id === 'scg' || id === 'obd' || id === 'elg' || id === 'rav') r[id] = 3;
+    if (d.x || d.trial || id === 'scg' || id === 'obd' || id === 'elg' || id === 'rav' || id === 'phk' || id === 'edr' || id === 'hbn') r[id] = 3;
     else if ((n[id] || 0) <= 1) r[id] = 2;
   });
   return r;
@@ -2278,7 +2719,7 @@ function detailHTML(id, extra) {
 }
 
 /* ---------- music: track by screen and board state, intensity by how close the duel is to ending ---------- */
-var FIELD_MUSIC = { mon: 'ocean', nfr: 'nether', vil: 'village', tch: 'trial', dpc: 'sculk', wman: 'raid', mine: 'cave', dgn: 'cave' };
+var FIELD_MUSIC = { mon: 'ocean', nfr: 'nether', vil: 'village', tch: 'trial', dpc: 'sculk', wman: 'raid', mine: 'cave', dgn: 'cave', bst: 'nether', epo: 'sculk', srv: 'overworld' };
 function sceneMusic() {
   if (typeof MUSIC === 'undefined') return;
   var G = ST.G, onGame = $('#game').classList.contains('on');
@@ -2324,7 +2765,7 @@ function myDeck() {
   return E.DECKS.A.c;
 }
 function deckOpt(o, on, attr) {
-  var lead = { A: 'igd', B: 'zom', C: 'obd', D: 'rav', E: 'elg', F: 'rmg', G: 'brz', X: 'wb', R: 'back' }[o.k];
+  var lead = { A: 'igd', B: 'zom', C: 'obd', D: 'rav', E: 'elg', F: 'rmg', G: 'brz', H: 'phk', I: 'edr', J: 'psr', X: 'wb', R: 'back' }[o.k];
   return '<button class="dko' + (on ? ' on' : '') + '" ' + attr + '="' + o.k + '">' + (o.k === 'R' ? backHTML({ size: 'sm' }) : cardHTML(lead, { size: 'sm' })) +
     '<span class="tx"><b>' + esc(o.n) + '</b><small>' + esc(o.tx) + '</small></span></button>';
 }
@@ -2390,11 +2831,18 @@ function drawDex() {
 $('#dex').addEventListener('click', function (e) { var t = e.target.closest('[data-k]'); if (t) openSheet(detailHTML(t.dataset.k.split(':')[1])); });
 
 /* ---------- sheet, toast, floats ---------- */
+var sheetGuard = 0;
 function openSheet(html) { $('#sheet .in').innerHTML = html + '<div class="acts"><button class="btn" data-close>关闭</button></div>'; $('#sheet').classList.add('on'); }
-function closeSheet() { $('#sheet').classList.remove('on'); }
+function closeSheet() { ST.posPick = false; $('#sheet').classList.remove('on'); }
 $('#sheet').addEventListener('click', function (e) {
   if (e.target.id === 'sheet' || e.target.closest('[data-close]')) { closeSheet(); return; }
-  var b = e.target.closest('[data-act]'); if (b) { closeSheet(); var a = SHEET_ACTS[+b.dataset.act]; if (a) myAct(a); return; }
+  var b = e.target.closest('[data-act]');
+  if (b) {
+    if (Date.now() < sheetGuard) return;
+    var a = SHEET_ACTS[+b.dataset.act]; if (!a) { closeSheet(); return; }
+    if (!ST.posPick) { var tw = twinOf(a); if (tw) { pickPos(a, tw); return; } }
+    closeSheet(); myAct(a); return;
+  }
   var k = e.target.closest('[data-k]'); if (k && k.dataset.k.indexOf('dex:') === 0) openSheet(detailHTML(k.dataset.k.slice(4)));
 });
 var toastT = 0;
@@ -2420,8 +2868,8 @@ function openAsk() {
   var L = legalMine(); if (!L.length) return;
   if (ask.kind === 'ch') {
     var tiles = ask.ty === 'card' ? '<div class="gl">' + ask.opts.filter(Boolean).map(function (id) { return cardHTML(id, { k: 'dex:' + id }); }).join('') + '</div>' : '';
-    $('#sheet .in').innerHTML = '<div class="ti" style="font-size:22px">选择</div><p>' + esc(ask.tx || '') + (ask.ty === 'mz' ? '（也可以直接点棋盘上发红光的怪兽）' : '') + '</p>' + tiles + actsHTML(L) + (ST.mode === 'net' ? '<p class="wait" id="askT"></p>' : '');
-    $('#sheet').classList.add('on'); ST.askOpen = G.n; return;
+    $('#sheet .in').innerHTML = '<div class="ti" style="font-size:22px">选择</div><p>' + esc(ask.tx || '') + (ask.ty === 'mz' ? '（也可以直接点棋盘上发红光的怪兽）' : '') + '</p>' + tiles + askTimerLine() + actsHTML(L);
+    $('#sheet').classList.add('on'); ST.askOpen = G.n; sheetGuard = Date.now() + 400; return;
   }
   var ctx = '';
   if (ask.ev === 'sum' && ask.cont.d) { var m = G.P[ask.cont.d.p].mz[ask.cont.d.z]; if (m) ctx = '：' + C[m.c.id].n + '（ATK ' + E.atkOf(G, ask.cont.d.p, ask.cont.d.z) + '）'; }
@@ -2429,9 +2877,11 @@ function openAsk() {
   if (ask.ev === 'spl') { var sp = G.P[1 - ask.p].sz[ask.cont.d.sz]; if (sp) ctx = '：' + C[sp.c.id].n; }
   $('#sheet .in').innerHTML = '<div class="ti" style="font-size:22px">陷阱时机</div><p>' + esc((EVN[ask.ev] || '') + ctx) + '</p>' +
     '<div class="gl">' + ask.opts.filter(function (i) { return i >= 0; }).map(function (i) { return cardHTML(G.P[ST.me].sz[i].c.id, { k: 'dex:' + G.P[ST.me].sz[i].c.id }); }).join('') + '</div>' +
-    actsHTML(L) + (ST.mode === 'net' ? '<p class="wait" id="askT"></p>' : '');
-  $('#sheet').classList.add('on'); ST.askOpen = G.n;
+    askTimerLine() + actsHTML(L);
+  $('#sheet').classList.add('on'); ST.askOpen = G.n; sheetGuard = Date.now() + 400;
 }
+/* The countdown line is rendered (with its final height) before the buttons, so it never pushes them around. */
+function askTimerLine() { return ST.mode === 'net' ? '<p class="wait" id="askT" style="min-height:1.4em;margin:4px 0">15 秒内未选择视为' + (ST.G.ask.kind === 'trap' ? '不发动' : '默认选项') + '</p>' : ''; }
 var askTimer = 0;
 function armAskTimeout() {
   clearInterval(askTimer);
@@ -2439,7 +2889,7 @@ function armAskTimeout() {
   var n = G.n, left = 15;
   askTimer = setInterval(function () {
     if (!ST.G || ST.G.n !== n || !ST.G.ask) { clearInterval(askTimer); return; }
-    left--; var el = $('#askT'); if (el) el.textContent = left + ' 秒后视为不发动';
+    left--; var el = $('#askT'); if (el) el.textContent = left + ' 秒内未选择视为' + (ST.G.ask.kind === 'trap' ? '不发动' : '默认选项');
     if (left <= 0) { clearInterval(askTimer); closeSheet(); var L = legalMine(); if (L.length) myAct(ST.G.ask && ST.G.ask.kind === 'ch' ? L[0] : L[L.length - 1]); }
   }, 1000);
 }
@@ -2447,10 +2897,20 @@ function pbar(p) {
   var G = ST.G, P = G.P[p], pct = Math.max(0, Math.min(100, P.lp / (E.K.lp / 100)));
   return '<span class="who">' + esc(P.nick) + '</span><div class="lp" data-lp="' + p + '"><i style="width:' + pct + '%"></i><b>' + P.lp + '</b></div>' +
     (P.em ? '<span class="em" title="绿宝石">◆' + P.em + '</span>' : '') +
-    '<span class="pile"><button data-k="deck:' + p + '">卡组 ' + P.deck.length + '</button><button data-k="grave:' + p + '">墓地 ' + P.grave.length + '</button>' +
+    '<span class="pile"><button data-k="deck:' + p + '">卡组 ' + P.deck.length + '</button><button data-k="grave:' + p + '"' + (gyCan(p) ? ' class="can"' : '') + '>墓地 ' + P.grave.length + '</button>' +
+    (P.ban && P.ban.length ? '<button data-k="ban:' + p + '" title="末影箱：被封存（除外）的卡">末影 ' + P.ban.length + '</button>' : '') +
     '<button data-k="extra:' + p + '">额外 ' + P.extra.length + '</button></span>';
 }
-var EXTRA_T = { rs: 1, xs: 1 }, HAND_T = { ns: 1, st: 1, sp: 1, ss: 1 };
+var EXTRA_T = { rs: 1, xs: 1 }, HAND_T = { ns: 1, st: 1, sp: 1, ss: 1, he: 1 };
+function gyCan(p) { return p === ST.me && legalMine().some(function (a) { return a.t === 'gy'; }); }
+/* A defence-position twin {..., d: 1} exists for special summons whose position is open; lists show only the base action. */
+function twinOf(a, L) { if (a.d) return null; var k = E.key(Object.assign({}, a, { d: 1 })); return (L || legalMine()).filter(function (x) { return E.key(x) === k; })[0] || null; }
+function noTwins(L) { return L.filter(function (a) { return !a.d; }); }
+function pickPos(a, tw) {
+  SHEET_ACTS = [a, tw]; ST.posPick = true;
+  $('#sheet .in').innerHTML = '<div class="ti" style="font-size:22px">选择表示形式</div><p>' + esc(describe(a)) + '</p><div class="acts"><button class="btn r" data-act="0">攻击表示</button><button class="btn g" data-act="1">守备表示</button><button class="btn" data-close>取消</button></div>';
+  $('#sheet').classList.add('on');
+}
 function monHTML(p, z, L) {
   var G = ST.G, m = G.P[p].mz[z], k = 'mz:' + p + ':' + z;
   if (!m) return '<div class="slot" data-k="' + k + '"></div>';
@@ -2521,6 +2981,7 @@ function render() {
   } else ab.classList.remove('on');
 }
 
+function dsOf(ds, a) { var G = ST.G; return typeof ds === 'function' ? ds(G, G.cur, a) : ds; }
 function describe(a) {
   var G = ST.G, P = G.P[G.cur], O = G.P[1 - G.cur];
   switch (a.t) {
@@ -2531,6 +2992,7 @@ function describe(a) {
       if (ty === 'card') return C[o].n;
       if (ty === 'yn') return '发动';
       if (ty === 'hand') { var hc = G.P[G.ask.p].hand.filter(function (c) { return c.u === o; })[0]; return hc ? C[hc.id].n : '?'; }
+      if (ty === 'zone') { var zc = E.stCard(G, o[0], [o[1], o[2]]), zup = o[1] !== 's' || (G.P[o[0]].sz[o[2]] && G.P[o[0]].sz[o[2]].up); return (o[0] === ST.me ? '我方 ' : '对手 ') + (zc ? (zup ? C[zc.id].n : '盖放的卡') : '?'); }
       if (ty === 'mz') { var tm = G.P[o[0]].mz[o[1]]; return (o[0] === ST.me ? '我方 ' : '对手 ') + (tm ? (tm.up ? C[tm.c.id].n : '盖放的怪兽') : '?'); }
       return String(o);
     }
@@ -2538,14 +3000,18 @@ function describe(a) {
     case 'rs': return '红石召唤 ' + C[P.extra[a.x].id].n + ' ← ' + a.m.map(function (z) { return C[P.mz[z].c.id].n; }).join(' + ');
     case 'xs': return '附魔召唤 ' + C[P.extra[a.x].id].n + ' ← ' + a.m.map(function (z) { return C[P.mz[z].c.id].n; }).join(' + ');
     case 'ef': {
-      var em = P.mz[a.z], ed = C[em.c.id];
+      var em = P.mz[a.z], ed = C[em.c.id], eg = Array.isArray(ed.ign) ? ed.ign[a.e] : ed.ign;
+      if (eg && eg.ds) return dsOf(eg.ds, a);
       if (!a.tg) return '发动效果';
       if (a.tg[0] === 'm') return '去掉1层经验：破坏 ' + (O.mz[a.tg[1]] && O.mz[a.tg[1]].up ? C[O.mz[a.tg[1]].c.id].n : '盖放的怪兽');
       if (a.tg[0] === 's') return '去掉1层经验：破坏 ' + (O.sz[a.tg[1]] && O.sz[a.tg[1]].up ? C[O.sz[a.tg[1]].c.id].n : '盖放的卡');
       if (a.tg[0] === 'f') return '去掉1层经验：破坏场地 ' + C[O.fz.c.id].n;
-      var tt = G.P[a.tg[0]].mz[a.tg[1]]; return '改变表示形式：' + (a.tg[0] === G.cur ? '我方 ' : '对手 ') + C[tt.c.id].n + (ed.id === 'cpg' ? '' : '');
+      if (ed.ign && (Array.isArray(ed.ign) ? ed.ign[a.e] : ed.ign).ds) return dsOf((Array.isArray(ed.ign) ? ed.ign[a.e] : ed.ign).ds, a);
+    var tt = G.P[a.tg[0]].mz[a.tg[1]]; return '改变表示形式：' + (a.tg[0] === G.cur ? '我方 ' : '对手 ') + C[tt.c.id].n + (ed.id === 'cpg' ? '' : '');
     }
-    case 'fe': return '丢弃 ' + C[P.hand[a.h].id].n + '，抽1张';
+    case 'fe': { var fdd = C[P.fz.c.id].fd.ign; return fdd.ds ? dsOf(fdd.ds, a) : '发动场地效果'; }
+    case 'gy': { var gd = C[P.grave[a.i].id]; return gd.n + '：' + (gd.gy.ds ? dsOf(gd.gy.ds, a) : '发动墓地效果'); }
+    case 'he': { var hd = C[P.hand[a.h].id].hnd; return hd.ds ? dsOf(hd.ds, a) : '发动手牌效果'; }
     case 'wt': return '支付1绿宝石，抽1张';
     case 'ns': {
       var d = C[P.hand[a.h].id], tr = a.tr.map(function (z) { var m = P.mz[z]; return m.up ? C[m.c.id].n : '盖放怪兽'; }).join('、');
@@ -2564,6 +3030,7 @@ function describe(a) {
       if (s.id === 'wch') return '弹回 ' + C[O.mz[a.tg].c.id].n;
       if (s.id === 'vpl') return '传送 ' + C[P.mz[a.tg].c.id].n;
       if (s.id === 'wht') return '繁殖 ' + C[a.tg].n;
+      if (s.sp && s.sp.ds) return dsOf(s.sp.ds, a);
       if (s.sub === 'fd') return '发动场地' + (P.fz ? '（替换 ' + C[P.fz.c.id].n + '）' : '');
       if (s.sub === 'ev') return '发动事件';
       return '发动';
@@ -2577,6 +3044,7 @@ function describe(a) {
   return a.t;
 }
 function actsHTML(acts) {
+  acts = noTwins(acts); ST.posPick = false;
   SHEET_ACTS = acts;
   return acts.length ? '<div class="acts">' + acts.map(function (a, i) { var o = a.t === 'ans' ? ST.G.ask.opts[a.i] : 0; return '<button class="btn ' + (a.t === 'at' ? 'r' : a.t === 'sp' ? 't' : a.t === 'st' ? 'p' : EXTRA_T[a.t] ? 'gold' : a.t === 'ans' ? (o === null || o === -1 ? '' : 'r') : 'g') + '" data-act="' + i + '">' + esc(describe(a)) + '</button>'; }).join('') + '</div>' : '';
 }
@@ -2589,7 +3057,8 @@ $('#game').addEventListener('click', function (e) {
   var G = ST.G, k = t.dataset.k.split(':'), L = legalMine();
   if (k[0] === 'menu') { openMenu(); return; }
   if (k[0] === 'ask') { openAsk(); return; }
-  if (k[0] === 'grave') { openSheet('<div class="ti" style="font-size:22px">' + esc(G.P[+k[1]].nick) + ' 的墓地</div>' + (G.P[+k[1]].grave.length ? pileHTML(G.P[+k[1]].grave.slice().reverse()) : '<p>空的</p>')); return; }
+  if (k[0] === 'grave') { var gp = +k[1], ga = gp === ST.me ? L.filter(function (a) { return a.t === 'gy'; }) : []; openSheet('<div class="ti" style="font-size:22px">' + esc(G.P[gp].nick) + ' 的墓地</div>' + (ga.length ? '<p style="font-size:13px;color:var(--mute)">墓地效果：封存（除外）这张卡来发动，每回合每种卡1次。</p>' + actsHTML(ga) : '') + (G.P[gp].grave.length ? pileHTML(G.P[gp].grave.slice().reverse()) : '<p>空的</p>')); return; }
+  if (k[0] === 'ban') { var bp = +k[1]; openSheet('<div class="ti" style="font-size:22px">' + esc(G.P[bp].nick) + ' 的末影箱</div><p style="font-size:13px;color:var(--mute)">被封存（除外）的卡。一般不会再回来，少数卡会利用它们。</p>' + (G.P[bp].ban.length ? pileHTML(G.P[bp].ban.slice().reverse()) : '<p>空的</p>')); return; }
   if (k[0] === 'extra' || k[0] === 'xsum') {
     var xp = k[0] === 'xsum' ? ST.me : +k[1], xa = xp === ST.me ? L.filter(function (a) { return EXTRA_T[a.t]; }) : [];
     openSheet('<div class="ti" style="font-size:22px">合成区（额外卡组）</div><p style="font-size:13px;color:var(--mute)">合成怪兽用「工作台」召唤；红石怪兽和附魔怪兽直接在这里召唤。</p>' + actsHTML(xa) + pileHTML(G.P[xp].extra));
@@ -2704,7 +3173,7 @@ function slotRect(p, z) { return FX.rel(document.querySelector('[data-k="mz:' + 
 var BIG = { redstone: '红石召唤！', enchant: '附魔召唤！', trial: '试炼召唤！', hero: '村庄英雄！', bolt: '雷暴！',
   raid: function (x) { return '劫掠第' + x.v + '波！'; }, field: function (x) { return x.id ? C[x.id].n : '场地被破坏'; },
   event: function (x) { return x.id ? C[x.id].n : '事件结束'; }, sky: function () { return E.isNight(ST.G) ? '夜幕降临' : '天亮了'; },
-  vault: function (x) { return '宝库：' + C[x.id].n; } };
+  vault: function (x) { return '宝库：' + C[x.id].n; }, hog: '猪皇永不陨落！', boom: '床爆炸了！', lava: '掉进岩浆了！' };
 async function playFx(list, snap, it) {
   snap = snap || { mz: {}, ids: {}, grave: {} };
   var pre = list.filter(function (f) { return f.k === 'atk'; });
@@ -2893,8 +3362,8 @@ function endReplay() { REP = null; clearTimeout(ST.aiTimer); var b = $('#repbar'
    Each player publishes its own actions as [globalIndex, action] in presence,
    trimmed by the opponent's ack. Seeds and decks also travel in presence,
    so both pages build the same game and replay the same action stream. */
-/* Protocol version: peers with a different value are ignored (v2 engine, optional traps). */
-var NETV = 3;
+/* Protocol version: peers with a different value are ignored (v3 engine: ender chest, graveyard effects, position twins). */
+var NETV = 4;
 var NET = { role: null, room: null, tried: false, dr: null, code: '', gid: 0, rnd: '', log: [], ready: false, players: [], mySeat: -1, started: -1, unsub: null, lobbyUnsub: null, ggSent: -1 };
 function rcode() { var s = '', a = 'abcdefghjkmnpqrstuvwxyz23456789'; for (var i = 0; i < 4; i++) s += a[Math.floor(Math.random() * a.length)]; return s; }
 async function getRoom() {
