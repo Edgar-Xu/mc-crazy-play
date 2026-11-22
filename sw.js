@@ -2,7 +2,7 @@
    the cached copy is used only when offline. Other same-origin files: cache first, refreshed in the
    background. Google Fonts: stale-while-revalidate. Install bypasses the HTTP cache so a new build never
    pre-caches stale files; old caches are removed when a new build activates. */
-var CACHE = 'mccrazy-3.1.0-6ef536b847';
+var CACHE = 'mccrazy-3.2.0-f1cddecb4e';
 var SHELL = ['./', 'index.html', 'duel.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return Promise.all(SHELL.map(function (u) { return fetch(new Request(u, { cache: 'reload' })).then(function (r) { if (r.ok) return c.put(u, r); }); })); }).then(function () { return self.skipWaiting(); }));
