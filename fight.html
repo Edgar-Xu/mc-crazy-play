@@ -83,6 +83,12 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
 #cut canvas{width:90px;height:90px;image-rendering:pixelated;border:3px solid var(--gold)}#cut b{font-size:34px;color:var(--gold);text-shadow:0 4px 0 #000;letter-spacing:4px}#cut small{display:block;font-size:13px;color:#fff}
 #flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
 #nums{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#ptags{position:absolute;inset:0;pointer-events:none;overflow:hidden}#ptags.off{display:none}
+.ptag{position:absolute;left:0;top:0;margin:-30px 0 0 -18px;width:36px;text-align:center;font:700 12px/18px monospace;color:#fff;border:2px solid #000;text-shadow:0 1px 0 #000;opacity:.92}
+.ptag::after{content:'';position:absolute;left:50%;bottom:-8px;margin-left:-6px;border:6px solid transparent;border-bottom:0;border-top-color:inherit}
+.ptag.r{background:#d23a2e}.ptag.b{background:#2e6fd2}
+.ptag.r::after{border-top-color:#d23a2e}.ptag.b::after{border-top-color:#2e6fd2}
+.ptag.me{font-size:14px;line-height:20px;margin:-34px 0 0 -21px;width:42px;opacity:1;box-shadow:0 0 0 2px #fff}
 #nums span{position:absolute;font-weight:700;font-size:18px;color:#fff;text-shadow:0 2px 0 #000;animation:num .7s forwards;white-space:nowrap}
 #nums span.big{font-size:26px;color:var(--gold)}#nums span.tag{font-size:16px;color:#9ae0ff}#nums span.warn{font-size:18px;color:#ff8a6a}
 @keyframes num{from{transform:translate(-50%,0) scale(1.3)}20%{transform:translate(-50%,-14px) scale(1)}to{transform:translate(-50%,-44px);opacity:0}}
@@ -118,6 +124,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
 .tabs{display:flex;gap:4px}.tabs .btn{flex:1;min-height:40px;font-size:13px}.np .sub{font-size:12px;opacity:.8;margin-top:4px}.np .dim{opacity:.6;font-size:12px;margin:4px 0}
 .rlist{display:flex;flex-direction:column;gap:4px;max-height:130px;overflow:auto}.rlist .it{display:flex;align-items:center;gap:8px;background:#1a0f08;padding:4px 8px;border:2px solid #000}.rlist .it span{flex:1;font-size:13px}.rlist .it .btn{min-height:36px;padding:2px 10px;font-size:12px}
 .np .status{margin-top:8px;font-size:13px;text-align:center;color:var(--gold);min-height:18px}.np p{font-size:12px;line-height:1.5;margin:2px 0;opacity:.85}
+.lnaddr{margin:8px 0;padding:8px 10px;background:#1a0f08;border:2px solid #000;font-size:14px;line-height:1.5}.lnaddr b{display:block;font-size:26px;letter-spacing:1px;color:var(--gold);font-family:monospace;user-select:all}
 .code{font-family:monospace;color:var(--gold);letter-spacing:3px;font-size:22px}
 .seats{display:flex;gap:12px;justify-content:center;margin-top:12px}.seat{width:min(42%,260px);background:var(--panel);border:3px solid var(--edge);padding:10px;text-align:center}.seat.rdy{border-color:#3eaa2a}
 .seat canvas{width:64px;height:64px;image-rendering:pixelated;display:block;margin:0 auto 4px;border:2px solid #000}.seat b{display:block;font-size:15px}.seat small{display:block;font-size:12px;opacity:.85}.seat .st{margin-top:4px;font-size:12px;color:var(--gold)}
@@ -187,6 +194,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
   <div class="combo l" id="cb0"><b>0</b><span>连击</span><small></small></div>
   <div class="combo r" id="cb1"><b>0</b><span>连击</span><small></small></div>
   <div id="nums"></div>
+  <div id="ptags"><div id="pt0" class="ptag r">1P</div><div id="pt1" class="ptag b">2P</div></div>
   <div id="cut"><canvas width="90" height="90"></canvas><div><b></b><small></small></div></div>
   <div id="banner"></div>
   <div id="ctl">
@@ -217,7 +225,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
   <h3>胜负</h3>每回合 60 秒，三局两胜；超时按剩余血量百分比判定。
   <div class="row"><button class="btn gold" id="hClose">知道了</button></div></div></div>
 </div>
-<script>window.MC_APP={v:"3.5.0"};</script>
+<script>window.MC_APP={v:"3.5.1"};</script>
 <script>
 /* MC Crazy music: a small procedural tracker on Web Audio. All tracks are original compositions written for
    this project in a block-world mood (sparse piano, soft pads, a "choir" pad for dungeons, chip drums for
@@ -2170,32 +2178,183 @@ var NETX = (function () {
       ws.addEventListener('error', function () { clearTimeout(t); bad(new Error('连不上 ' + a)); });
     });
   }
+  /* ---------- MQTT over WebSocket: rooms relayed by a public broker ----------
+     No device has to be reachable, so it works behind any NAT. Every room is one topic; a message is
+     {f: sender, p: presence} (q: please answer with yours, x: leaving). Peers expire after EXPIRE ms of silence
+     and everyone repeats its presence every BEAT ms. MQTT 3.1.1, QoS 0, no retained messages. */
+  var BROKERS = ['wss://test.mosquitto.org:8081/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
+  var BEAT = 3000, EXPIRE = 10000, MIN_GAP = 40;
+  function enc(s) { return new TextEncoder().encode(s); }
+  function join8(parts) { var n = 0, i, o, k = 0; for (i = 0; i < parts.length; i++) n += parts[i].length; o = new Uint8Array(n); for (i = 0; i < parts.length; i++) { o.set(parts[i], k); k += parts[i].length; } return o; }
+  function mstr(b) { return join8([new Uint8Array([b.length >> 8, b.length & 255]), b]); }
+  function packet(b0, body) {
+    var len = [], x = body.length;
+    do { var d = x % 128; x = Math.floor(x / 128); len.push(x > 0 ? d | 128 : d); } while (x > 0);
+    return join8([new Uint8Array([b0].concat(len)), body]);
+  }
+  function mqttConn(url, cid, will, WS) {
+    return new Promise(function (ok, bad) {
+      var ws; try { ws = new WS(url, ['mqtt']); } catch (e) { bad(e); return; }
+      ws.binaryType = 'arraybuffer';
+      var buf = new Uint8Array(0), on = null, cl = [], ready = false, pid = 1, ping = null, dead = false;
+      var t = setTimeout(function () { if (!ready) { try { ws.close(); } catch (e) {} bad(new Error('连不上服务器')); } }, 7000);
+      function raw(p) { if (ws.readyState === 1) ws.send(p); }
+      function down() { if (dead) return; dead = true; clearInterval(ping); clearTimeout(t); if (!ready) bad(new Error('连不上服务器')); else cl.forEach(function (f) { try { f(); } catch (e) {} }); }
+      ws.onopen = function () {
+        var flags = 0x02 | 0x04, body = join8([mstr(enc('MQTT')), new Uint8Array([4, flags, 0, 30]), mstr(enc(cid)), mstr(enc(will.topic)), mstr(enc(will.msg))]);
+        raw(packet(0x10, body));
+      };
+      ws.onmessage = function (e) {
+        var d = e.data; d = d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+        buf = join8([buf, d]);
+        for (;;) {
+          if (buf.length < 2) break;
+          var mul = 1, len = 0, i = 1, b;
+          do { if (i >= buf.length) return; b = buf[i++]; len += (b & 127) * mul; mul *= 128; } while (b & 128);
+          if (buf.length < i + len) break;
+          var type = buf[0] >> 4, qos = (buf[0] >> 1) & 3, body = buf.subarray(i, i + len); buf = buf.slice(i + len);
+          if (type === 2) {
+            if (body[1] !== 0) { ready = true; try { ws.close(); } catch (x) {} clearTimeout(t); bad(new Error('服务器拒绝连接')); return; }
+            ready = true; clearTimeout(t);
+            ping = setInterval(function () { raw(new Uint8Array([0xC0, 0])); }, 20000);
+            ok(api);
+          } else if (type === 3) {
+            var tl = (body[0] << 8) | body[1], topic = new TextDecoder().decode(body.subarray(2, 2 + tl)), at = 2 + tl + (qos ? 2 : 0);
+            if (on) on(topic, new TextDecoder().decode(body.subarray(at)));
+          }
+        }
+      };
+      ws.onclose = down; ws.onerror = down;
+      var api = {
+        url: url,
+        sub: function (topic) { pid = pid % 65535 + 1; raw(packet(0x82, join8([new Uint8Array([pid >> 8, pid & 255]), mstr(enc(topic)), new Uint8Array([0])]))); },
+        unsub: function (topic) { pid = pid % 65535 + 1; raw(packet(0xA2, join8([new Uint8Array([pid >> 8, pid & 255]), mstr(enc(topic))]))); },
+        pub: function (topic, s) { raw(packet(0x30, join8([mstr(enc(topic)), enc(s)]))); },
+        onmsg: function (f) { on = f; }, onclose: function (f) { cl.push(f); },
+        open: function () { return !dead; },
+        close: function () { raw(new Uint8Array([0xE0, 0])); dead = true; clearInterval(ping); try { ws.close(); } catch (e) {} }
+      };
+    });
+  }
+  /* client with the same room-like API as client(); `prefix` scopes topics per game, e.g. 'mccrazy/bb1/' */
+  function mqttClient(C, prefix, me) {
+    var rooms = {}, alive = true;
+    function list(R) {
+      var o = [{ peer: me, isMe: true, sameTab: true, kind: 'viewer', guest: false, by: null, presence: R.mine, updatedAt: Date.now() }];
+      Object.keys(R.peers).forEach(function (k) { o.push({ peer: k, isMe: false, sameTab: false, kind: 'viewer', guest: false, by: null, presence: R.peers[k].p, updatedAt: R.peers[k].t }); });
+      return o.sort(function (a, b) { return a.peer < b.peer ? -1 : a.peer > b.peer ? 1 : 0; });
+    }
+    function fire(R, joined, left) { var L = list(R); R.ls.forEach(function (f) { try { f({ peers: L.slice(), joined: joined, left: left, updated: [] }); } catch (e) { console.warn(e); } }); }
+    function send(R, q) { if (!alive) return; R.last = Date.now(); var m = { f: me, p: R.mine }; if (q) m.q = 1; C.pub(prefix + R.name, JSON.stringify(m)); }
+    C.onmsg(function (topic, s) {
+      var R = rooms[topic.slice(prefix.length)]; if (!R || topic.indexOf(prefix) !== 0) return;
+      var m; try { m = JSON.parse(s); } catch (e) { return; }
+      if (!m || typeof m.f !== 'string' || m.f === me || m.f.length > 40) return;
+      if (m.x) { if (R.peers[m.f]) { delete R.peers[m.f]; fire(R, [], [{ peer: m.f }]); } return; }
+      var fresh = !R.peers[m.f];
+      R.peers[m.f] = { p: m.p && typeof m.p === 'object' ? m.p : {}, t: Date.now() };
+      if (m.q || fresh) send(R, 0);
+      fire(R, fresh ? [{ peer: m.f }] : [], []);
+    });
+    var tm = setInterval(function () {
+      var now = Date.now();
+      Object.keys(rooms).forEach(function (k) {
+        var R = rooms[k], gone = [];
+        Object.keys(R.peers).forEach(function (p) { if (now - R.peers[p].t > EXPIRE) { delete R.peers[p]; gone.push({ peer: p }); } });
+        if (gone.length) fire(R, [], gone);
+        if (now - R.last > BEAT) send(R, 0);
+      });
+    }, 1000);
+    C.onclose(function () { alive = false; clearInterval(tm); Object.keys(rooms).forEach(function (k) { rooms[k].errs.forEach(function (f) { try { f(); } catch (e) {} }); }); });
+    function room(name) {
+      var R = rooms[name] = { name: name, peers: {}, ls: [], errs: [], mine: {}, last: 0, tq: null, tf: null };
+      C.sub(prefix + name); send(R, 1);
+      return {
+        name: name,
+        presence: function (patch) {
+          for (var k in patch) { if (patch[k] === null) delete R.mine[k]; else R.mine[k] = patch[k]; }
+          if (!alive) return Promise.reject(new Error('disconnected'));
+          /* like the hub, a change of our own presence is reported to our listeners too */
+          if (!R.tf) R.tf = setTimeout(function () { R.tf = null; if (rooms[name] === R) fire(R, [], []); }, 0);
+          var gap = Date.now() - R.last;
+          if (gap >= MIN_GAP) send(R, 0);
+          else if (!R.tq) R.tq = setTimeout(function () { R.tq = null; if (rooms[name] === R) send(R, 0); }, MIN_GAP - gap);
+          return Promise.resolve();
+        },
+        peers: function () { return list(R); },
+        onPeers: function (f, err) {
+          R.ls.push(f); if (err) R.errs.push(err);
+          setTimeout(function () { f({ peers: list(R), joined: list(R), left: [], updated: [] }); }, 0);
+          return function () { var i = R.ls.indexOf(f); if (i >= 0) R.ls.splice(i, 1); };
+        },
+        join: function (n) { return Promise.resolve(room(n)); },
+        leave: function () { if (rooms[name] !== R) return Promise.resolve(); delete rooms[name]; if (alive) { C.pub(prefix + name, JSON.stringify({ f: me, x: 1 })); C.unsub(prefix + name); } return Promise.resolve(); },
+        connected: function () { return alive; }
+      };
+    }
+    var lobby = room('lobby');
+    lobby.close = function () { if (alive) C.pub(prefix + 'lobby', JSON.stringify({ f: me, x: 1 })); alive = false; clearInterval(tm); C.close(); };
+    lobby.kind = 'mqtt'; lobby.me = me; lobby.broker = C.url;
+    return lobby;
+  }
+  /* connect to the first broker that answers; every device tries them in the same order */
+  function mqttJoin(prefix, opts) {
+    opts = opts || {};
+    var WS = opts.WS || (typeof WebSocket !== 'undefined' ? WebSocket : null), list = opts.brokers || BROKERS;
+    try { var q = new URLSearchParams(location.search).get('broker'); if (q) list = [q]; } catch (e) {}
+    if (!WS) return Promise.reject(new Error('没有 WebSocket'));
+    var me = Math.random().toString(36).slice(2, 10);
+    function at(i, last) {
+      if (i >= list.length) return Promise.reject(last || new Error('连不上服务器'));
+      return mqttConn(list[i], 'mcc-' + me, { topic: prefix + 'lobby', msg: JSON.stringify({ f: me, x: 1 }) }, WS)
+        .then(function (C) { return mqttClient(C, prefix, me); }, function (e) { return at(i + 1, e); });
+    }
+    return at(0);
+  }
   var LAN_PORT = 8787;
-  /* LAN host inside the Android app: the native plugin owns the sockets, the hub runs here in JS. */
-  var lanPlugin = null;
+  /* LAN host inside the Android app: the native plugin owns the sockets, the hub runs here in JS.
+     The games run in iframes, and Capacitor executes plugin calls only from the main frame (calls made through
+     an iframe's own bridge never resolve), so the plugin is always taken from the top window. */
+  var lanPlugin = null, lanH = null;
   function nativeLan() {
     if (lanPlugin) return lanPlugin;
     try {
-      var Cap = window.Capacitor || (window.parent && window.parent.Capacitor);
+      var Cap = null;
+      try { Cap = window.top.Capacitor; } catch (e) {}
+      if (!Cap) try { Cap = window.parent.Capacitor; } catch (e) {}
+      if (!Cap) Cap = window.Capacitor;
       if (!Cap || !(Cap.isNativePlatform ? Cap.isNativePlatform() : Cap.isNative)) return null;
       lanPlugin = (Cap.Plugins && Cap.Plugins.LanServer) || (Cap.registerPlugin && Cap.registerPlugin('LanServer')) || null;
       return lanPlugin;
     } catch (e) { return null; }
   }
+  function within(p, ms, msg) { return new Promise(function (ok, bad) { var t = setTimeout(function () { bad(new Error(msg)); }, ms); Promise.resolve(p).then(function (v) { clearTimeout(t); ok(v); }, function (e) { clearTimeout(t); bad(e); }); }); }
+  /* this device's Wi-Fi / hotspot address (app only), or null */
+  function lanIp() {
+    var P = nativeLan(); if (!P || !P.address) return Promise.resolve(null);
+    return within(P.address(), 3000, 'timeout').then(function (r) { return r && r.ip && r.ip !== '0.0.0.0' ? r.ip : null; }, function () { return null; });
+  }
   function lanHost() {
-    var P = nativeLan(); if (!P) return Promise.reject(new Error('只有安卓 App 和电脑版可以创建局域网房间'));
-    var H = hub(), conns = {};
-    return P.start({ port: LAN_PORT }).then(function (info) {
+    var P = nativeLan(); if (!P) return Promise.reject(new Error('只有安卓 App 和电脑版可以开局域网大厅'));
+    if (!lanH) {
+      var H = hub(), conns = {};
+      lanH = { H: H, conns: conns };
       P.addListener('open', function (e) { var id = e.id, h = { m: null, c: [] }; conns[id] = h;
         H.attach({ send: function (s) { P.send({ id: id, data: s }); }, onmsg: function (f) { h.m = f; }, onclose: function (f) { h.c.push(f); } }); });
       P.addListener('message', function (e) { var h = conns[e.id]; if (h && h.m) h.m(e.data); });
       P.addListener('close', function (e) { var h = conns[e.id]; if (h) { delete conns[e.id]; h.c.forEach(function (f) { f(); }); } });
-      var pr = loop(); H.attach(pr[0]);
-      var R = client(pr[1]); R.kind = 'lan'; R.addr = (info && info.ip ? info.ip : '?') + ':' + LAN_PORT; R.close = function () { P.stop(); };
+    }
+    var L = lanH;
+    Object.keys(L.conns).forEach(function (id) { var h = L.conns[id]; delete L.conns[id]; h.c.forEach(function (f) { f(); }); });
+    return within(P.start({ port: LAN_PORT }), 6000, '局域网服务没有响应，请重启 App 再试').then(function (info) {
+      var pr = loop(); L.H.attach(pr[0]);
+      var R = client(pr[1]); R.kind = 'lan'; R.ip = info && info.ip && info.ip !== '0.0.0.0' ? info.ip : null;
+      R.addr = (R.ip || '?') + ':' + LAN_PORT;
+      R.close = function () { pr[1].close(); try { P.stop(); } catch (e) {} };
       return R;
     });
   }
-  return { hub: hub, client: client, loop: loop, rtcHost: rtcHost, rtcJoin: rtcJoin, lanJoin: lanJoin, lanHost: lanHost, canLanHost: function () { return !!nativeLan(); }, LAN_PORT: LAN_PORT };
+  return { hub: hub, client: client, loop: loop, rtcHost: rtcHost, rtcJoin: rtcJoin, mqttJoin: mqttJoin, BROKERS: BROKERS, lanJoin: lanJoin, lanIp: lanIp, lanHost: lanHost, canLanHost: function () { return !!nativeLan(); }, LAN_PORT: LAN_PORT };
 })();
 
 
@@ -2578,7 +2737,19 @@ var BNET = (function () {
     });
   }
   var comboBase = [0, 0];
+  /* overhead 1P / 2P markers (red / blue); the local player's marker is larger */
+  function tags(G) {
+    for (var i = 0; i < 2; i++) {
+      var f = G.P[i], el = $('pt' + i), p = GFX.project(f.x, (f.y || 0) + 2.25, f.z);
+      if (!p || p[0] < -0.1 || p[0] > 1.1) { el.style.display = 'none'; continue; }
+      var me = S.net ? S.me === i : i === 0;
+      el.textContent = i === 1 && !S.net ? (S.mode === 'train' ? '木桩' : 'CPU') : (i + 1) + 'P';
+      el.className = 'ptag ' + (i ? 'b' : 'r') + (me ? ' me' : '');
+      el.style.display = ''; el.style.transform = 'translate(' + (p[0] * LW).toFixed(1) + 'px,' + (p[1] * LH).toFixed(1) + 'px)';
+    }
+  }
   function hud(G) {
+    tags(G);
     for (var i = 0; i < 2; i++) {
       var f = G.P[i], h = $('hp' + i), r = Math.max(0, f.hp) / f.mhp, bar = h.querySelector('.bar i');
       bar.style.width = (r * 100) + '%'; bar.classList.toggle('low', r < 0.3);
@@ -2634,8 +2805,9 @@ var BNET = (function () {
    then the rollback session (net.js) during play.
    Transports, all exposing the same room-like API (presence / peers / onPeers / join / leave):
      claude   the Claude artifact `room` capability: the lobby is the room, matches are sub-rooms
-     internet (app) PeerJS: the lobby hub sits on whichever device holds the well-known id 'bblobby'
-              (the first player to arrive claims it); a match is a direct WebRTC room hosted by one player
+     internet (app) a public MQTT broker relays the lobby and the match rooms (NETX.mqttJoin), so nobody has to be
+              reachable from outside and no device holds the lobby; a match also tries a direct WebRTC link
+              and uses it while it works (see "direct link")
      lan      a LAN hub (the Android app's LanServer or tools/lan-server.js): lobby and matches on it
    Quick match pairs seekers deterministically: seekers sorted by peer id are paired (0,1), (2,3), ...;
    the lower id hosts and the room code is a hash of both ids. */
@@ -2644,7 +2816,8 @@ var BBON = (function () {
   var S = X.S, $ = X.$, V = BNET.V, DT = 1000 / 60;
   var N = { kind: '', L: null, Lconn: null, M: null, Mconn: null, unL: null, unM: null, code: '', host: 0, seat: 0, mm: 0, mmT: 0, viaMM: 0,
     rnd: rs(), rd: -1, started: -1, stage: 0, sess: null, opp: null, oppPeer: '', acc: 0, tick: 0, lastRecv: 0, lastSeen: 0, ping: 0, pt: 0, ptT: 0, pe: 0, seenPt: 0,
-    endShown: false, oppLeft: false, joinT: 0, lobbyN: 0, busy: false };
+    endShown: false, oppLeft: false, joinT: 0, lobbyN: 0, busy: false,
+    dR: null, dM: null, unD: null, dUp: false, dk: null, dTry: null, dN: 0, dSq: -1, dLast: 0, sq: 0, rLast: 0 };
   function rs() { return Math.random().toString(36).slice(2, 10); }
   function rcode() { var s = '', a = 'abcdefghjkmnpqrstuvwxyz23456789'; for (var i = 0; i < 4; i++) s += a[Math.floor(Math.random() * a.length)]; return s; }
   function pairCode(a, b) { var s = a + '|' + b, h = 5381, al = 'abcdefghjkmnpqrstuvwxyz23456789', o = ''; for (var i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) >>> 0; for (i = 0; i < 4; i++) { o += al[h % al.length]; h = Math.floor(h / al.length); } return o; }
@@ -2683,7 +2856,7 @@ var BBON = (function () {
     var c = $('oConn');
     if (kind === 'claude') { c.innerHTML = '<p>和朋友在 Claude 里打开同一个页面就能互相看到。</p>'; if (!N.L) useLobby(claudeRoom, null); return; }
     if (kind === 'internet') {
-      c.innerHTML = '<p>双方都要联网；同一个 Wi-Fi 下会自动直连。快速匹配会找同时在匹配的玩家。</p>';
+      c.innerHTML = '<p>双方都要联网（Wi-Fi 或移动数据都行），通过公共中转服务器连接。快速匹配会找同时在匹配的玩家。</p>';
       if (!N.L) connectInternet(); else setPlay(true);
       return;
     }
@@ -2691,19 +2864,29 @@ var BBON = (function () {
     c.innerHTML = '<p>不需要互联网，双方连同一个 Wi-Fi（或一台手机开热点）。一台设备当房主，其他人输入它的地址。</p>' +
       (NETX.canLanHost() ? '<button class="btn green" id="lnMk">在这台手机上开局域网大厅</button>' : '') +
       (pageLan() ? '<button class="btn" id="lnHere">加入这台电脑（' + esc(hostOf()) + '）</button>' : '') +
+      '<div id="lnMine" class="lnaddr" style="display:none"></div>' +
       '<div class="row"><input class="tx" id="lnAddr" placeholder="房主地址，例如 192.168.1.5" value="' + esc(lastAddr) + '" inputmode="decimal" autocomplete="off"><button class="btn" id="lnJoin">连接</button></div>';
-    if ($('lnMk')) $('lnMk').onclick = function () { stat('oStat', '正在开启局域网大厅…'); NETX.lanHost().then(function (R) { useLobby(R, R); stat('oStat', '局域网大厅已开启，地址 ' + R.addr); }, function (e) { stat('oStat', err(e)); }); };
+    if (N.L && N.L.kind === 'lan' && N.L.ip) showAddr(N.L.ip, 1);
+    else if (NETX.canLanHost()) NETX.lanIp().then(function (ip) { if (ip && N.kind === 'lan' && !(N.L && N.L.ip)) showAddr(ip, 0); });
+    if ($('lnMk')) $('lnMk').onclick = function () { var b = this; b.disabled = true; stat('oStat', '正在开启局域网大厅…'); NETX.lanHost().then(function (R) { b.disabled = false; useLobby(R, R); if (R.ip) showAddr(R.ip, 1); }, function (e) { b.disabled = false; stat('oStat', err(e)); }); };
     if ($('lnHere')) $('lnHere').onclick = function () { stat('oStat', '正在连接…'); NETX.lanJoin(hostOf()).then(function (R) { useLobby(R, R); stat('oStat', '已连接 ' + hostOf()); }, function (e) { stat('oStat', err(e)); }); };
     $('lnJoin').onclick = function () { var a = $('lnAddr').value.trim(); if (!a) { stat('oStat', '先输入房主地址'); return; } X.store.set('lanAddr', a); stat('oStat', '正在连接…'); NETX.lanJoin(a).then(function (R) { useLobby(R, R); stat('oStat', '已连接 ' + R.addr); }, function (e) { stat('oStat', err(e)); }); };
     setPlay(!!N.L);
   }
-  /* internet lobby: join the shared hub; if nobody holds it yet, become the hub */
+  /* the LAN host's own address, large, so the others can type it in */
+  function showAddr(ip, hosting) {
+    var el = $('lnMine'); if (!el) return;
+    el.style.display = '';
+    el.innerHTML = (hosting ? '大厅已开启，让朋友输入这个地址：' : '这台手机的地址：') + '<b>' + esc(ip) + '</b>';
+  }
+  /* internet lobby: a topic on a public MQTT broker */
   function connectInternet() {
     setPlay(false); stat('oStat', '正在连接大厅…');
-    NETX.rtcJoin('bblobby').catch(function (e) {
-      if (!/找不到/.test(err(e))) throw e;
-      return NETX.rtcHost('bblobby').catch(function (e2) { if (e2 && e2.type === 'unavailable-id') return NETX.rtcJoin('bblobby'); throw e2; });
-    }).then(function (R) { useLobby(R, R); stat('oStat', ''); }, function (e) { stat('oStat', '大厅连接失败：' + err(e) + '；仍然可以用房间号对战'); setPlay(true); $('oMatch').disabled = true; });
+    var tag = N.kind;
+    NETX.mqttJoin('mccrazy/' + V + '/').then(function (R) {
+      if (N.kind !== tag || N.L) { R.close(); return; }
+      useLobby(R, R); stat('oStat', '');
+    }, function (e) { if (N.kind === tag) { stat('oStat', '大厅连接失败：' + err(e) + '，点「互联网」重试'); setPlay(false); } });
   }
   function useLobby(R, conn) {
     N.L = R; N.Lconn = conn; setPlay(true);
@@ -2747,35 +2930,82 @@ var BBON = (function () {
   $('oBack').addEventListener('click', function () { SFX.play('click'); closeLobby(); X.show('title'); });
 
   /* ---------- match room ---------- */
-  function retry(fn, n, wait) { return fn().catch(function (e) { if (n <= 1) throw e; return new Promise(function (ok) { setTimeout(ok, wait); }).then(function () { return retry(fn, n - 1, wait); }); }); }
   async function enterMatch(code, host, viaMM) {
     if (N.busy || N.M) return; N.busy = true;
     N.code = code; N.host = host ? 1 : 0; N.seat = host ? 0 : 1; N.viaMM = viaMM; N.rd = -1; N.started = -1; N.opp = null; N.oppPeer = ''; N.oppLeft = false; N.joinT = Date.now(); N.lastSeen = Date.now();
     stat('oStat', host ? '正在创建房间…' : '正在进入房间 ' + code + '…');
     try {
-      if (N.kind === 'internet') {
-        var R = host ? await NETX.rtcHost(code) : await retry(function () { return NETX.rtcJoin(code); }, viaMM ? 6 : 1, 1500);
-        N.Mconn = R; N.M = await R.join('bb');
-      } else { N.Mconn = null; N.M = await N.L.join('bb-' + code); }
+      if (!N.L) throw new Error('还没有连上大厅');
+      N.Mconn = null; N.M = await N.L.join('bb-' + code);
     } catch (e) { N.busy = false; N.M = null; stat('oStat', err(e)); if (viaMM) startMM(); return; }
     N.busy = false;
     N.unM = N.M.onPeers(function (ch) { onRoom(ch.peers); }, function () { if (N.M) { N.oppLeft = true; drawRoom(); } });
     lobbyPres(); roomPres(); X.show('room'); drawRoom();
     clearInterval(N.timer); N.timer = setInterval(roomTick, 500);
+    if (N.host) directHost();
   }
-  function base() { return { v: V, nick: nick(), c: S.c[0], as: S.as, host: N.host, rnd: N.rnd, rd: N.rd, st: N.stage, pt: N.pt, pe: N.pe }; }
-  function roomPres(extra) { if (!N.M) return; var p = base(); if (extra) for (var k in extra) p[k] = extra[k]; N.M.presence(p).catch(function () {}); }
-  function onRoom(peers) {
+
+  /* ---------- direct link (internet) ----------
+     The relay room always exists. In addition the host opens a WebRTC room under a random key that it announces
+     in its relay presence (dk), and the guest dials it. While the link carries the opponent's presence (dUp),
+     everything is read from the link and the relay copy is ignored; the relay still gets a copy twice a second,
+     so when the link fails the match continues over the relay without a gap. */
+  function canDirect() { return N.kind === 'internet' && typeof Peer !== 'undefined'; }
+  function directHost() {
+    if (!canDirect()) return;
+    var dk = rs() + rs().slice(0, 4), tag = N.code;
+    NETX.rtcHost('bb' + dk).then(function (R) {
+      if (!N.M || N.code !== tag) { R.close(); return; }
+      N.dk = dk; directUse(R); roomPres();
+    }, function () {});
+  }
+  function directDial(dk) {
+    if (!canDirect() || N.dTry === dk || N.dR || N.dN >= 3) return;
+    N.dTry = dk; N.dN++;
+    var tag = N.code, n = 0;
+    (function go() {
+      NETX.rtcJoin('bb' + dk).then(function (R) { if (!N.M || N.code !== tag || N.dR) { R.close(); return; } directUse(R); },
+        function () { if (++n < 4 && N.M && N.code === tag && !N.dR) setTimeout(go, 2000); });
+    })();
+  }
+  function directUse(R) {
+    N.dR = R;
+    R.join('bb').then(function (M) {
+      if (N.dR !== R) return;
+      N.dM = M;
+      N.unD = M.onPeers(function (ch) { onRoom(ch.peers, 1); }, function () { if (N.dR === R) directDrop(); });
+      roomPres();
+    });
+  }
+  function directDrop() {
+    if (N.unD) try { N.unD(); } catch (e) {}
+    if (N.dR) try { N.dR.close(); } catch (e) {}
+    N.dR = N.dM = N.unD = null; N.dUp = false; N.dTry = null;
+    if (S.scr === 'room') drawRoom();
+  }
+  function base() { return { v: V, nick: nick(), c: S.c[0], as: S.as, host: N.host, rnd: N.rnd, rd: N.rd, st: N.stage, pt: N.pt, pe: N.pe, dk: N.host ? N.dk || null : null, sq: ++N.sq }; }
+  function roomPres(extra) {
+    if (!N.M) return; var p = base(); if (extra) for (var k in extra) p[k] = extra[k];
+    if (N.dM) N.dM.presence(p).catch(function () {});
+    var now = Date.now();
+    if (!N.dUp || !N.sess || now - N.rLast >= 500) { N.rLast = now; N.M.presence(p).catch(function () {}); }
+  }
+  function onRoom(peers, via) {
     var others = peers.filter(function (p) { return !(p.isMe || p.sameTab) && p.presence && p.presence.v === V; });
     var o = others[0] || null, now = Date.now();
-    if (o) { N.opp = o.presence; N.oppPeer = o.peer; N.lastSeen = now; N.oppLeft = false; }
+    if (via) {
+      if (!o) { if (N.dUp) { N.dUp = false; if (S.scr === 'room') drawRoom(); } return; }
+      if (o.presence.sq !== N.dSq) { N.dSq = o.presence.sq; N.dLast = now; if (!N.dUp) { N.dUp = true; if (S.scr === 'room') drawRoom(); } }
+    } else if (N.dUp) return;
+    else if (o && !N.host && o.presence.dk) directDial(o.presence.dk);
+    if (o) { N.opp = o.presence; N.oppPeer = via ? N.oppPeer : o.peer; N.lastSeen = now; N.oppLeft = false; }
     else if (N.opp) { N.oppLeft = true; }
     if (!o) { if (S.scr === 'room') drawRoom(); return; }
     var p = o.presence;
     /* ping: echo the opponent's stamp; when our own stamp comes back, that is one round trip */
-    if (p.pt && p.pt !== N.seenPt) { N.seenPt = p.pt; N.pe = p.pt; }
+    if (p.pt && p.pt !== N.seenPt) { N.seenPt = p.pt; N.pe = p.pt; if (!N.sess || N.endShown) setTimeout(roomPres, 0); }
     if (p.pe && p.pe === N.pt && N.ptT) { N.ping = now - N.ptT; N.ptT = 0; }
-    if (p.host === N.host) { N.seat = N.oppPeer < (peers.filter(function (q) { return q.isMe || q.sameTab; })[0] || {}).peer ? 1 : 0; }
+    if (p.host === N.host && !via) { N.seat = N.oppPeer < (peers.filter(function (q) { return q.isMe || q.sameTab; })[0] || {}).peer ? 1 : 0; }
     if (N.host && typeof p.st === 'number') {} else if (!N.host && typeof p.st === 'number') N.stage = Math.max(0, Math.min(2, p.st | 0));
     if (N.sess && p.g === N.started && p.i) { N.sess.recv(p.i0 | 0, p.i, p.ak | 0, p.fr, p.adv, p.h); N.lastRecv = now; }
     if (p.gg === N.started && N.sess && !N.endShown) { N.endShown = true; showEnd('对方认输了', 1); }
@@ -2786,6 +3016,7 @@ var BBON = (function () {
   }
   function roomTick() {
     if (!N.M) return;
+    if (N.dUp && Date.now() - N.dLast > 2500) { N.dUp = false; N.dSq = -1; }
     if (!N.sess || N.endShown) { N.pt = Date.now() % 1e9; N.ptT = Date.now(); roomPres(); }
     if (N.viaMM && !N.opp && Date.now() - N.joinT > 10000) { leaveRoom(); stat('oStat', '对手没有进入房间，重新匹配…'); startMM(); return; }
     if (N.sess && !N.endShown && Date.now() - Math.max(N.lastRecv, N.startT) > 8000) { N.endShown = true; showEnd('对方断开连接', 1); }
@@ -2793,7 +3024,7 @@ var BBON = (function () {
   }
   function drawRoom() {
     $('rCode').textContent = N.code.toUpperCase();
-    $('rPing').textContent = N.ping ? '延迟 ' + N.ping + ' ms' : '';
+    $('rPing').textContent = (N.L && N.L.kind === 'lan' && N.L.ip ? '局域网地址 ' + N.L.ip + '  ' : '') + (N.ping ? '延迟 ' + N.ping + ' ms' : '') + (N.kind === 'internet' && N.opp ? (N.dUp ? ' · 直连' : ' · 中转') : '');
     var mine = { nick: nick(), c: S.c[0], as: S.as, rd: N.rd }, seats = N.seat === 0 ? [mine, N.opp] : [N.opp, mine];
     var html = seats.map(function (p, i) {
       if (!p) return '<div class="seat"><b>等待对手…</b><small>把房间号 ' + N.code.toUpperCase() + ' 告诉朋友</small></div>';
@@ -2812,6 +3043,7 @@ var BBON = (function () {
   $('rLeave').addEventListener('click', function () { SFX.play('click'); leaveRoom(); X.show('online'); });
   function leaveRoom() {
     clearInterval(N.timer);
+    directDrop(); N.dk = null; N.dN = 0; N.dSq = -1;
     if (N.unM) try { N.unM(); } catch (e) {}
     if (N.M) try { N.M.leave(); } catch (e) {}
     if (N.Mconn) try { N.Mconn.close(); } catch (e) {}
