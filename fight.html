@@ -226,7 +226,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
   <h3>胜负</h3>每回合 60 秒，三局两胜；超时按剩余血量百分比判定。
   <div class="row"><button class="btn gold" id="hClose">知道了</button></div></div></div>
 </div>
-<script>window.MC_APP={v:"3.6.1"};</script>
+<script>window.MC_APP={v:"3.6.2"};</script>
 <script>
 /* MC Crazy music: a small procedural tracker on Web Audio. All tracks are original compositions written for
    this project in a block-world mood (sparse piano, soft pads, a "choir" pad for dungeons, chip drums for
@@ -477,14 +477,14 @@ var FS = (function () {
   function fxa(at, k, o) { var f = { at: at, k: k }; if (o) for (var q in o) f[q] = o[q]; return f; }
   /* ---------- characters (original) ---------- */
   var C = {
-    fang: { n: '阿方', t: '方块剑士', role: '均衡', hp: 1240, spd: 0.095, col: '#38b6d8', ai: { r: 1.9, s1: 5.5, s2: 1.8 },
+    fang: { n: '阿方', t: '方块剑士', role: '均衡', hp: 1290, spd: 0.095, col: '#38b6d8', ai: { r: 1.9, s1: 5.5, s2: 1.8 },
       m: {
         A1: { an: 'sl1', len: 23, can: 14, nx: 'A2', mv: [[0, 7, 0.05]], h: [H(7, 3, [0, 2.0, 1.0, 0.3, 1.9], 26, 28, 0.03, 0)], fx: [fxa(8, 'arc', { r: 1.7, a: -1 })] },
         A2: { an: 'sl2', len: 24, can: 15, nx: 'A3', mv: [[0, 7, 0.05]], h: [H(8, 3, [0, 2.0, 1.0, 0.3, 1.9], 26, 28, 0.03, 0)], fx: [fxa(8, 'arc', { r: 1.7, a: 1 })] },
         A3: { an: 'sl3', len: 26, can: 16, nx: 'A4', mv: [[2, 10, 0.17]], h: [H(9, 3, [0, 2.1, 1.0, 0.3, 1.9], 30, 30, 0.04, 0)], fx: [fxa(9, 'arc', { r: 1.9, a: 0, v: 1 })] },
         /* the fourth normal rotates through three sets (f.fset): enchanted dash, planted sword, pearl and bolt.
            Timings below are final (raw: not rescaled by pace) */
-        A4a: { an: 'spinD', n: '附魔突斩', raw: 1, len: 40, can: 28, inv: [2, 18], dashTo: [1.1, 15, 0.24], mv: [[3, 18, 0.24]], h: [H(6, 12, [-0.3, 1.6, 1.25, 0, 1.9], 38, 62, 0.03, 0.24, { sw: 1, stop: 9 })], fx: [fxa(3, 'enchant'), fxa(8, 'arc', { r: 2.0, a: 1, big: 1 })] },
+        A4a: { an: 'spinD', n: '附魔突斩', raw: 1, len: 40, can: 28, inv: [2, 18], mv: [[3, 18, 0.24]], carry: 18, h: [H(4, 14, [-0.3, 1.6, 1.25, 0, 1.9], 38, 62, 0, 0.2, { sw: 1, stop: 6, carry: 1 })], fx: [fxa(3, 'enchant'), fxa(8, 'arc', { r: 2.0, a: 1, big: 1 })] },
         A4b: { an: 'plant', n: '插剑', raw: 1, len: 40, can: 28, plant: 12, h: [H(12, 4, [-2.3, 2.3, 2.3, 0, 2.0], 40, 62, 0.02, 0.24, { radial: 1, sw: 1, stop: 10 })], fx: [fxa(12, 'ring', { big: 1 }), fxa(12, 'quake')] },
         /* the bolt sends whoever it hits to the sword; picking the sword up blasts around it and keeps them floating */
         A4c: { an: 'pearl', n: '珍珠回剑', raw: 1, len: 44, can: 34, inv: [0, 14], pearl: [3, 24], sp: [{ at: 8, k: 'bolt' }], h: [H(24, 2, [-2.3, 2.3, 2.3, -0.5, 2.6], 30, 62, 0.02, 0.24, { radial: 1, sw: 1, stop: 9 })] },
@@ -585,8 +585,8 @@ var FS = (function () {
     [['fang', 'S2'], ['fang', 'JA2'], ['mo', 'A5'], ['fu', 'A4'], ['lin', 'A3']].forEach(function (q) { C[q[0]].m[q[1]].h.forEach(function (h) { h.sw = 1; if (h.box[3] > 0) h.box[3] = 0; }); });
     /* fang: the fourth normal may be the pearl bolt, which lands later than a melee hit */
     C.fang.m.A3.h[0].hs = Math.max(C.fang.m.A3.h[0].hs, 52);
-    /* per-character damage trim: fang -30% */
-    for (var q in C.fang.m) (C.fang.m[q].h || []).forEach(function (h) { h.dmg = Math.round(h.dmg * 0.7); });
+    /* per-character damage trim: fang -10% */
+    for (var q in C.fang.m) (C.fang.m[q].h || []).forEach(function (h) { h.dmg = Math.round(h.dmg * 0.9); });
   })();
   var ORDER = ['fang', 'xiao', 'mo', 'fu', 'lin'];
   var AS = { golem: { n: '铁巨人', d: '跃向对手，落地震地挑空，再补一拳' }, wolf: { n: '灰狼', d: '追着对手连咬三口' }, snow: { n: '雪人', d: '原地连射六颗追踪雪球' } };
@@ -600,7 +600,7 @@ var FS = (function () {
       st: 'idle', t: 0, mv: null, mt: 0, hd: {}, hit: 0, hitE: 0, cd: { S1: 0, S2: 0, B: 0, H: AS_FIRST }, combo: 0, pr: 0, stun: 0, inv: 0, stop: 0,
       held: -1, buf: {}, pm: 0, buff: 0, rise: 0, down: 0, ko: 0, flash: 0, shield: 0, shT: 0, use: 0, pipUse: 0, kdl: 0, whiff: 0, stat: { dmg: 0, maxc: 0 },
       /* fang: normal set and sword; air flags; xiao: skill charges; substitution boost */
-      pk: 0, cT0: 0, ench: 0, fset: 0, fsetC: -1, sword: 1, swx: 0, swz: 0, s2air: 0, airN: 0, ch: c.m.S1.charge || 0, arm: 0, subT: 0, chLock: 0 };
+      pk: 0, cT0: 0, ench: 0, fset: 0, fsetC: -1, carry: -1, sword: 1, swx: 0, swz: 0, s2air: 0, airN: 0, ch: c.m.S1.charge || 0, arm: 0, subT: 0, chLock: 0 };
   }
   function newMatch(o) {
     o = o || {};
@@ -637,7 +637,7 @@ var FS = (function () {
     if (f.mv && f.st === 'move') { var m = moveOf(f, f.mv); if (m.inv && f.mt >= m.inv[0] && f.mt < m.inv[1]) return true; }
     return false;
   }
-  function setSt(f, s) { f.st = s; f.t = 0; if (s !== 'move') { f.mv = null; f.mt = 0; } }
+  function setSt(f, s) { f.st = s; f.t = 0; if (s !== 'move') { f.mv = null; f.mt = 0; f.carry = -1; } }
   function face(f, x, z) { var l = len2(x, z); if (l > 1e-6) { f.dx = x / l; f.dz = z / l; } }
   /* aim assist when a move starts: turn to the opponent if roughly ahead and in range */
   function aim(f, o, r) {
@@ -678,7 +678,7 @@ var FS = (function () {
     if (m.ench) f.ench = m.ench + m.len;
     aim(f, o, m.aim || 4.5);
     if (m.cls === 'u') { f.en = 0; G.cine = 40; G.cineP = i; G.ev.push({ t: 'ult', p: i, n: m.n }); }
-    f.st = 'move'; f.t = 0; f.mv = k; f.mt = 0; f.hd = {}; f.hit = 0; f.hitE = 0; f.whiff = 0;
+    f.st = 'move'; f.t = 0; f.mv = k; f.mt = 0; f.hd = {}; f.carry = -1; f.hit = 0; f.hitE = 0; f.whiff = 0;
     if (m.cls === 's' && k !== 'S1b') f.use++;
     /* targeted dashes stop just short of the opponent (at most the full dash) */
     if (m.dashTo) {
@@ -813,6 +813,14 @@ var FS = (function () {
       if (t === m.jump[0]) { var js = stickOf(f.hold || 0); if (js[0] || js[1]) { f.jx = js[0]; f.jz = js[1]; } else { f.jx = -f.dx; f.jz = -f.dz; } }
       if (t >= m.jump[0] && t < m.jump[1]) { f.vx = f.jx * m.jump[2]; f.vz = f.jz * m.jump[2]; f.vy = m.jump[3]; }
     }
+    /* swept target: drifts back along the dash until it trails 0.8 behind, then moves with fang */
+    if (f.carry >= 0) {
+      var cv = G.P[f.carry];
+      if (m.carry && t < m.carry && cv.st === 'air') {
+        var off = (cv.x - f.x) * f.dx + (cv.z - f.z) * f.dz, lat = -(cv.x - f.x) * f.dz + (cv.z - f.z) * f.dx, no = Math.max(-0.8, off - 0.14);
+        cv.x = f.x + f.dx * no - f.dz * lat * 0.8; cv.z = f.z + f.dz * no + f.dx * lat * 0.8; cv.vx = f.vx; cv.vz = f.vz; clamp(cv);
+      } else { if (cv.st === 'air') { cv.vx = f.dx * 0.02; cv.vz = f.dz * 0.02; } face(f, cv.x - f.x, cv.z - f.z); f.carry = -1; }
+    }
     if (m.plant && t === m.plant) { f.sword = 0; f.fset = 2; f.swx = f.x + f.dx * 0.8; f.swz = f.z + f.dz * 0.8; f.swx = Math.max(-AX, Math.min(AX, f.swx)); f.swz = Math.max(-AZ, Math.min(AZ, f.swz)); G.ev.push({ t: 'plant', p: i, x: f.swx, z: f.swz }); }
     if (m.pearl && t === m.pearl[0]) {
       /* blink to a point a few blocks from the sword: along the stick, else past the opponent as seen from the sword */
@@ -907,7 +915,7 @@ var FS = (function () {
     switch (s.k) {
       /* xiao's fire charge: medium range, steers a little; s.up marks the launching pair */
       case 'fire': proj(G, i, 'fire', f.x + dx * 0.6, f.y + 1.1, f.z + dz * 0.6, dx, dz, { vx: dx * 0.26, vz: dz * 0.26, spd: 0.26, steer: 0.08, steerT: 16, life: 18, w: 0.55, h: 0.55,
-        dmg: s.up ? 13 : 14, hs: s.up ? 40 : 34, kb: s.up ? [0.04, 0.28] : [0.08, 0.13], gf: s.up ? 0 : 1, sw: s.up ? 1 : 0, stop: 6, cls: 'n' }); break;
+        dmg: s.up ? 13 : 14, hs: s.up ? 40 : 30, kb: s.up ? [0.04, 0.28] : [0.08, 0.13], gf: s.up ? 0 : 1, sw: s.up ? 1 : 0, stop: 6, cls: 'n' }); break;
       /* firework rocket from the air: aims at the opponent's chest, homes, launches */
       case 'rocket': {
         var ry0 = f.y + 1.2, rd = Math.max(1, Math.min(12, len2(o.x - f.x, o.z - f.z))), rvy = (o.y + 0.9 - ry0) / (rd / 0.34);
@@ -981,6 +989,7 @@ var FS = (function () {
   function pushApart(G) {
     var a = G.P[0], b = G.P[1];
     if (a.st === 'held' || b.st === 'held' || a.st === 'down' || b.st === 'down') return;
+    if (a.mv === 'A4a' || b.mv === 'A4a') return;
     var x = b.x - a.x, z = b.z - a.z, d = len2(x, z);
     if (d < 0.75 && Math.abs(a.y - b.y) < 1.6) {
       var ux = d > 1e-6 ? x / d : 1, uz = d > 1e-6 ? z / d : 0, p = (0.75 - d) / 2;
@@ -1011,6 +1020,7 @@ var FS = (function () {
       var dx = f.dx, dz = f.dz;
       if (h.radial) { var x = o.x - f.x, z = o.z - f.z, d = len2(x, z); if (d > 1e-6) { dx = x / d; dz = z / d; } }
       var res = applyHit(G, f, o, h, m.cls || 'n', dx, dz);
+      if (res === 'hit' && h.carry) { f.carry = 1 - i; o.vx = o.vz = 0; }
       if (res === 'hit' && h.lock) { f.held = 1 - i; setSt(o, 'held'); }
     }
   }
