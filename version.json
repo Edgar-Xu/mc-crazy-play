@@ -1,9 +1,10 @@
 {
- "v": "3.6.3",
- "apk": "https://github.com/Edgar-Xu/mc-crazy-play/releases/download/v3.6.3/MC-Crazy-3.6.3.apk",
+ "v": "3.6.4",
+ "apk": "https://github.com/Edgar-Xu/mc-crazy-play/releases/download/v3.6.4/MC-Crazy-3.6.4.apk",
  "size": "4.5 MB",
  "notes": [
-  "阿方：连续出普攻就按附魔突斩、插剑、珍珠回剑轮换（没打中也算），停手半秒回到第一套",
-  "硝硝：炸药跳后 3 秒普攻算技能伤害，期间第一次命中加一颗豆；炸药跳冷却 8 秒"
+  "阿方削弱：生命、伤害下调，技能冷却加长，附魔减伤降为 10%",
+  "阿方捡剑后 1 秒内普攻变附魔突斩；附魔时环绕白紫色符文",
+  "硝硝地面粘性炸药和铁巨人援助改为中距离"
  ]
 }
