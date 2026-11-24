@@ -236,7 +236,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
   <h3>胜负</h3>每回合 60 秒，三局两胜；超时按剩余血量百分比判定。
   <div class="row"><button class="btn gold" id="hClose">知道了</button></div></div></div>
 </div>
-<script>window.MC_APP={v:"3.8.2"};</script>
+<script>window.MC_APP={v:"3.8.3"};</script>
 <script>
 /* MC Crazy music: a small procedural tracker on Web Audio. All tracks are original compositions written for
    this project in a block-world mood (sparse piano, soft pads, a "choir" pad for dungeons, chip drums for
@@ -534,23 +534,28 @@ var FS = (function () {
            1a whip kick, 2a arc (fastest, follows the stick, so it can go backwards), 3a rising kick.
            3a recovery and 4a start-up form the phase window: a blink into the air that skills and projectiles pass through */
         A1: { an: 'whip', n: '鞭腿', raw: 1, len: 20, can: 11, nx: 'A2', mv: [[0, 7, 0.06]], h: [H(7, 3, [0, 1.9, 0.9, 0.2, 1.6], 16, 26, 0.03, 0, { gf: 1, stop: 3 })], fx: [fxa(7, 'kickT')] },
-        /* 2a: a sliding step along the ground (up to about 2.1 blocks, stopping just short of a target ahead) that strikes on the way */
-        A2: { an: 'slide', n: '滑步电弧', raw: 1, len: 22, can: 13, nx: 'A3', aim: 4, dashTo: [0.7, 8, 0.26], mv: [[1, 9, 0.26]], h: [H(4, 6, [-0.2, 1.8, 0.95, 0.2, 1.8], 16, 32, 0.07, 0, { gf: 1, stop: 3 })], fx: [fxa(1, 'dashline'), fxa(5, 'zap')] },
+        /* Displacement of the normals follows the reference video (measured in body heights), times 1.85 blocks per body
+           height and 1.25 for the larger arena: 2a 4.6, 5a blink 5 (landing 1.4 past the target), 5a thrust 2.3,
+           6a blink back 3.5 and shuttle 7 blocks.
+           2a: a long slide along the ground that strikes on the way, stopping just short of a target ahead */
+        A2: { an: 'slide', n: '滑步电弧', raw: 1, len: 22, can: 13, nx: 'A3', aim: 6, halt: 1, dashTo: [0.7, 8, 0.575], mv: [[1, 9, 0.575]], h: [H(4, 6, [-0.2, 1.8, 0.95, 0.2, 1.8], 16, 32, 0.07, 0, { gf: 1, stop: 3 })], fx: [fxa(1, 'dashline'), fxa(5, 'zap')] },
         A3: { an: 'upper', n: '上挑', raw: 1, len: 26, can: 14, nx: 'A4', noH: 12, noC: 12, pinv: [13, 99], mv: [[2, 8, 0.08]], h: [H(8, 4, [0, 1.9, 1.0, 0, 2.2], 20, 40, 0.02, 0.27, { sw: 1, stop: 4 })], fx: [fxa(8, 'arc', { r: 1.7, a: 0, v: 1 })] },
         /* 4a: blink up and fire the ender orb down at the target; pressed late after 3a it rises higher and reaches farther */
         A4: { an: 'orbT', n: '末影球弹', raw: 1, air: 1, len: 30, can: 22, nx: 'A5', noH: 12, noC: 12, pinv: [0, 12], blink: [{ at: 4, up: 2.5, fwd: 0.4 }], hang: [1, 22], sp: [{ at: 11, k: 'eorb', r: 6 }] },
         A4s: { an: 'orbT', n: '末影球弹·慢', raw: 1, air: 1, len: 36, can: 28, nx: 'A5', noH: 18, noC: 18, pinv: [0, 18], blink: [{ at: 4, up: 3.3, fwd: 0.2 }], hang: [1, 28], sp: [{ at: 17, k: 'eorb', r: 9.5 }] },
-        /* 5a: blink two to three body lengths ahead and slam down; a fresh press dashes along the stick */
-        A5: { an: 'slamD', n: '闪现下砸', raw: 1, air: 1, len: 30, can: 20, nx: 'A5b', blink: [{ at: 4, up: 2.3, upO: 1.4, fwd: 2.4, toO: 0.7, r: 3.6 }], drop: [6, 0.42], h: [H(6, 8, [-1.2, 1.4, 1.3, -1.4, 1.6], 26, 34, 0.02, -0.25, { radial: 1, sw: 1, stop: 5 })], fx: [fxa(8, 'ring')] },
+        /* 5a: a long blink to the far side of the target (up to 6 blocks away), turned round to face it, then a slam
+           from above; with nobody in reach it blinks 3.2 blocks ahead. A fresh press is the short thrust (A5b) */
+        A5: { an: 'slamD', n: '闪现下砸', raw: 1, air: 1, len: 30, can: 20, nx: 'A5b', blink: [{ at: 4, up: 2.3, upO: 1.4, fwd: 5, toO: -1.4, r: 7, face: 1 }], drop: [6, 0.42], h: [H(6, 8, [-1.2, 1.4, 1.3, -1.4, 1.6], 26, 34, 0.02, -0.25, { radial: 1, sw: 1, stop: 5 })], fx: [fxa(8, 'ring')] },
         /* 5a second press: a short thrust (about 1 block) */
-        A5b: { an: 'dashS', n: '突刺', raw: 1, air: 1, len: 22, can: 13, nx: 'A6', aim: 3, dashTo: [0.7, 7, 0.15], mv: [[2, 9, 0.15]], h: [H(3, 7, [-0.2, 1.5, 1.0, 0, 1.9], 22, 30, 0.02, 0.12, { stop: 4 })], fx: [fxa(2, 'dashline')] },
-        /* 6a: a low shuttle straight through the target, the longest move of the string (about 4.6 blocks); the
-           passing hit carries the target about a block along. Mo turns at the far end and throws the chain; a catch is
-           yanked back through mo, frozen a moment, then bursts. Invulnerable throughout; ignores super armour,
-           interrupts moves; a missed chain recovers in 8 ticks; nothing can be pressed meanwhile */
-        A6: { an: 'shuttle', n: '末影锁链', raw: 1, air: 1, aim: 5, len: 48, can: 48, noH: 0, noC: 0, inv: [0, 32], whiffR: 8, dragThru: 1, thru: [2, 8], mv: [[2, 8, 0.77]], faceAt: [9, 31],
-          h: [H(3, 5, [-0.8, 1.2, 0.95, -0.4, 2.0], 10, 40, 0.13, 0, { stop: 3, gf: 1, flat: 1 }), H(11, 6, [0, 3.8, 0.9, -0.6, 2.4], 8, 50, 0, 0, { lock: 1, grab: 1, grabAir: 1, stop: 6, chain: 1 }),
-            H(30, 1, [-3, 3, 3, -1, 3], 36, 60, 0, 0.32, { lk: 1, stop: 8, fin: 1, burst: 1 })], fx: [fxa(2, 'dashline'), fxa(10, 'chainF')] },
+        A5b: { an: 'dashS', n: '突刺', raw: 1, air: 1, len: 22, can: 13, nx: 'A6', aim: 4, halt: 1, dashTo: [0.7, 8, 0.29], mv: [[2, 10, 0.29]], h: [H(3, 7, [-0.2, 1.5, 1.0, 0, 1.9], 22, 30, 0.02, 0.12, { stop: 4 })], fx: [fxa(2, 'dashline')] },
+        /* 6a (after the reference): a short blink back, then a low shuttle straight through the target (about 5.6 blocks).
+           The grab is the body itself: whatever it touches on the way through is hooked by the chain and dragged along
+           behind mo, then bursts. Invulnerable throughout; ignores super armour, interrupts moves; passing through
+           nobody recovers in 8 ticks; nothing can be pressed meanwhile */
+        A6: { an: 'shuttle', n: '末影锁链', raw: 1, air: 1, aim: 7, len: 46, can: 46, noH: 0, noC: 0, inv: [0, 32], whiffR: 8, dragThru: 1, thru: [4, 12],
+          blink: [{ at: 2, up: 0, fwd: -3.5, face: 1 }], mv: [[4, 12, 0.875]], faceAt: [25],
+          h: [H(4, 8, [-0.7, 0.6, 0.95, -0.4, 2.2], 12, 50, 0, 0, { lock: 1, grab: 1, grabAir: 1, stop: 3, chain: 1 }),
+            H(25, 1, [-3, 3, 3, -1, 3], 36, 60, 0, 0.32, { lk: 1, stop: 8, fin: 1, burst: 1 })], fx: [fxa(4, 'dashline'), fxa(4, 'chainF')] },
         /* 裂隙门 (docs/MO.md 3.1). Stage 1: 14-frame wind-up with hard body (a skill, ultimate or assist before it voids the skill), then a gate opens behind
            mo and acts on its own: one strike in front of mo, then star spikes along a widening rectangle, the last one binds.
            Stage 2 (S1c) within RIFT_W frames: 4-frame start, the collapse charges while S1 is held and bursts in a spiral */
@@ -1001,13 +1006,15 @@ var FS = (function () {
       /* a chain drags its catch in over a few frames instead of snapping it */
       if (m.pin) { v.x = f.x + f.dx * 0.9; v.z = f.z + f.dz * 0.9; v.y = 0; }
       else if (m.suck) { v.x += (f.x + f.dx * 0.8 - v.x) * 0.08; v.z += (f.z + f.dz * 0.8 - v.z) * 0.08; v.y += (1.0 - v.y) * 0.1; }
-      else if (m.dragThru) { var tx2 = f.x - f.dx * 1.1, tz2 = f.z - f.dz * 1.1; v.x += (tx2 - v.x) * 0.2; v.z += (tz2 - v.z) * 0.2; v.y += (0.6 - v.y) * 0.2; }
+      else if (m.dragThru) { var tx2 = f.x - f.dx * 1.1, tz2 = f.z - f.dz * 1.1; v.x += (tx2 - v.x) * 0.45; v.z += (tz2 - v.z) * 0.45; v.y += (0.6 - v.y) * 0.3; }
       else if (m.drag) { v.x += (f.x + f.dx * 0.95 - v.x) * 0.22; v.z += (f.z + f.dz * 0.95 - v.z) * 0.22; v.y += (Math.max(0.3, f.y) - v.y) * 0.22; }
       else { v.x = f.x + f.dx * 0.95; v.z = f.z + f.dz * 0.95; v.y = f.mv === 'A3' && f.c === 'fu' ? 0.5 : Math.max(0, v.y); }
       clamp(v);
     } }
     var moved = 0;
     if (m.mv) m.mv.forEach(function (s) { if (t >= s[0] && t < s[1]) { var sv = m.dashTo ? f.dashV : s[2]; f.vx = sv * f.dx; f.vz = sv * f.dz; if (s[3]) f.vy = s[3]; moved = 1; } });
+    /* halt: the dash stops dead at the end of its window instead of sliding on */
+    if (m.halt && m.mv && t === m.mv[m.mv.length - 1][1]) { f.vx = f.vz = 0; }
     if (!moved && grounded(f)) { f.vx *= 0.7; f.vz *= 0.7; }
     if (m.dive === 2) {
       if (t === 1) aim(f, o, 9);
@@ -1330,7 +1337,8 @@ var FS = (function () {
     var dmg = Math.max(1, Math.round(h.dmg * sc));
     if (d.boss) dmg = Math.round(dmg * 0.9);
     if (a.buff > 0) dmg = Math.round(dmg * 1.1);
-    var stop = Math.ceil((h.stop || 6) * STOP_K);
+    /* skill hits stop a quarter longer than normals, ultimate hits a third; finishers (fin) two ticks more */
+    var stop = Math.ceil((h.stop || 6) * STOP_K * (cls === 's' ? 1.25 : cls === 'u' ? 1.35 : 1)) + (h.fin && cls !== 'n' ? 2 : 0);
     a.hit = 1;
     /* body hierarchy and bone shield */
     var resist = bd === 'gk' || (bd === 'bt' && !h.grab) || (bd === 'yt' && cls === 'n' && !h.grab);
@@ -1343,7 +1351,7 @@ var FS = (function () {
     var use = h.use || (a.st === 'move' && moveOf(a, a.mv).cls === 's' ? a.use : 0);
     if (h.bp && !a.s2p) { a.s2p = 1; if (a.en < EN_MAX) { a.en++; G.ev.push({ t: 'pip', p: ai, n: a.en }); } }
     if (cls === 's' && use && a.pipUse !== use) { a.pipUse = use; if (a.en < EN_MAX) { a.en++; G.ev.push({ t: 'pip', p: ai, n: a.en }); } }
-    if (!shielded) G.ev.push({ t: 'hit', p: di, x: d.x - dx * 0.25, y: d.y + 1.1, z: d.z - dz * 0.25, dmg: dmg, pw: stop, fx: h.fx || '', combo: d.combo + 1, grab: h.grab ? 1 : 0, src: h.src || a.mv, cls: cls });
+    if (!shielded) G.ev.push({ t: 'hit', p: di, x: d.x - dx * 0.25, y: d.y + 1.1, z: d.z - dz * 0.25, hx: dx, hz: dz, dmg: dmg, pw: stop, fx: h.fx || '', combo: d.combo + 1, grab: h.grab ? 1 : 0, src: h.src || a.mv, cls: cls });
     G.shake = Math.max(G.shake, stop >= 12 ? 0.85 : stop >= 8 ? 0.45 : 0.18);
     if (stop >= 12) G.ev.push({ t: 'zoom', k: 0.05 });
     a.stop = Math.max(a.stop, stop); d.stop = stop;
@@ -2120,9 +2128,7 @@ var GFX = (function () {
           var tu = m.thru ? m.thru[1] : 8;
           if (mt < 2) return blendP(idle, an[0], ease(mt / 2));
           if (mt < tu) return an[0];
-          if (mt < tu + 3) return blendP(an[0], AN.chain[0], ease((mt - tu) / 3));
-          if (mt < 11) return AN.chain[0];
-          if (mt < 14) return blendP(AN.chain[0], AN.chain[1], ease((mt - 11) / 3));
+          if (mt < tu + 3) return blendP(an[0], AN.chain[1], ease((mt - tu) / 3));
           if (mt < m.len - 10) return AN.chain[1];
           return blendP(AN.chain[1], idle, ease((mt - (m.len - 10)) / 10));
         }
@@ -2544,6 +2550,54 @@ var GFX = (function () {
     gl.uniform3fv(u.uFog, L.fog); gl.uniform2f(u.uFogR, CSV && CSV.space ? 26 : CSV && CSV.k === 'dragon' ? 70 : 18, CSV && CSV.space ? 95 : CSV && CSV.k === 'dragon' ? 160 : 46); gl.uniform1f(u.uShN, SHN);
   }
   var shakeT = 0, flashLight = 0, dark = 0, zoomK = 0, OPT = { rm: false }, GS = 0.5;
+  /* camera director state: punch (zoom spring), impact pull, the current skill camera, speed lines, a white impact frame */
+  var punchK = 0, impK = 0, impP = [0, 0, 0], castCam = null, LINES = [], whiteF = 0, PUN = null, IMP = null, camLT = 0, camDT = 0;
+  /* a camera pulse held for the hit stop, then easing out over tau seconds (frame-rate independent) */
+  function pulseVal(P, tau) { if (!P) return 0; var el = performance.now() / 1000 - P.t0; return el < P.hold ? P.pk : P.pk * Math.exp(-(el - P.hold) / tau); }
+  function pulseSet(P, pk, hold) { var now = performance.now() / 1000; return !P || pk >= pulseVal(P, 0.14) ? { pk: pk, t0: now, hold: hold } : P; }
+  function camCast() {
+    if (!castCam) return null; var el = (performance.now() - castCam.t0) / 1000, k = el < 0.12 ? el / 0.12 : el < castCam.dur ? 1 : 1 - (el - castCam.dur) / 0.35;
+    if (k <= 0) { castCam = null; return null; } castCam.k = k * k * (3 - 2 * k); return castCam;
+  }
+  /* hit tiers from the stop length in ticks (after the simulation's scaling): 1 light, 2 medium, 3 heavy, 4 big */
+  function hitTier(pw) { return pw <= 2 ? 1 : pw <= 3 ? 2 : pw <= 5 ? 3 : 4; }
+  function camHit(G, e) {
+    if (OPT.rm) return;
+    var tier = hitTier(e.pw || 2), sk = e.cls === 's' || e.cls === 'u' ? 1.3 : 1, hx = e.hx || 0, hz = e.hz || 0, hold = (e.pw || 2) / ((FSm0 && FSm0.HZ) || 40);
+    /* directional kick along the blow, in screen space */
+    var kx = hx * camR[0] + hz * camR[2], ky = hx * camU[0] + hz * camU[2], px = [0, 2.5, 4.5, 7.5, 11][tier] * sk;
+    kickC[0] += kx * px; kickC[1] += ky * px - (tier >= 3 ? 2 : 0);
+    PUN = pulseSet(PUN, [0, 0.015, 0.03, 0.06, 0.1][tier] * sk, hold);
+    if (tier >= 3) { impP = [e.x, e.y, e.z || 0]; IMP = pulseSet(IMP, tier === 4 ? 0.3 : 0.18, hold); }
+    if (tier === 4 || (tier === 3 && sk > 1)) LINES.push({ p: [e.x, e.y, e.z || 0], t: 0, life: (tier === 4 ? 0.24 : 0.16) + hold, n: tier === 4 ? 26 : 16, c: G.P[e.p] && G.P[e.p].c === 'mo' ? EC.pink : [1, 1, 1], s: Math.random() * 100 });
+    if (tier === 4 && sk > 1) whiteF = performance.now() / 1000 + 0.05;
+  }
+  function camSwing(G, FSm, e) {
+    if (!e.sk || OPT.rm) return;
+    var f = G.P[e.p], mv = FSm.moveOf(f, e.k); if (!mv || mv.cls === 'u') return;
+    var fast = 0; (mv.mv || []).forEach(function (q) { if (Math.abs(q[2]) > fast) fast = Math.abs(q[2]); }); if (mv.dashTo) fast = Math.max(fast, mv.dashTo.length ? mv.dashTo[2] : 0.5);
+    var rise = mv.s2air || mv.jump || mv.hang || (mv.mv || []).some(function (q) { return q[3] > 0.1; });
+    castCam = { p: e.p, t0: performance.now(), dur: Math.min(0.9, (mv.len || 30) / (FSm.HZ || 40) * 0.8), lead: fast >= 0.2 ? 2.4 : 0.9, push: fast >= 0.2 ? 0.1 : 0.075, lift: rise ? 0.2 : 0, k: 0 };
+  }
+  /* speed lines toward an impact, drawn in screen space; and a one-frame white flash for the biggest skill hits */
+  function drawLines(Wd, Hd) {
+    var ov = [];
+    LINES = LINES.filter(function (L) {
+      L.t += camDT; var a = 1 - L.t / L.life; if (a <= 0) return false;
+      var c = mulV(VPm, [L.p[0], L.p[1], L.p[2], 1]); if (c[3] <= 0.01) return true;
+      var cx = c[0] / c[3], cy = c[1] / c[3], asp = Wd / Hd;
+      for (var k = 0; k < L.n; k++) {
+        var ang = (k / L.n) * 6.283 + hsh(L.s + k) * 0.4, r0 = 0.28 + hsh(L.s + k * 3.1) * 0.35 + (1 - a) * 0.25, r1 = 2.6, w = 0.012 + hsh(L.s + k * 7.7) * 0.022;
+        var dx = Math.cos(ang), dy = Math.sin(ang), nx = -dy * w, ny = dx * w;
+        var A = [cx + dx * r0 / asp, cy + dy * r0, 0], B = [cx + (dx * r1 + nx) / asp, cy + dy * r1 + ny, 0], C = [cx + (dx * r1 - nx) / asp, cy + dy * r1 - ny, 0];
+        var c0 = L.c.concat([0]), c1 = L.c.concat([0.85 * a]); triA(ov, A, B, C, c0, c1, c1);
+      }
+      return true;
+    });
+    if (whiteF > performance.now() / 1000) { var wc = [1, 1, 1, 0.28]; triA(ov, [-1, -1, 0], [1, -1, 0], [1, 1, 0], wc, wc, wc); triA(ov, [-1, -1, 0], [1, 1, 0], [-1, 1, 0], wc, wc, wc); }
+    if (ov.length) { gl.uniformMatrix4fv(progA.u.uVP, false, m4()); drawA(ov); }
+  }
+  function mulV(M, v) { return [M[0] * v[0] + M[4] * v[1] + M[8] * v[2] + M[12] * v[3], M[1] * v[0] + M[5] * v[1] + M[9] * v[2] + M[13] * v[3], M[2] * v[0] + M[6] * v[1] + M[10] * v[2] + M[14] * v[3], M[3] * v[0] + M[7] * v[1] + M[11] * v[2] + M[15] * v[3]]; }
   /* block afterimages: a snapshot of every part box each third simulation frame while dashing or blinking */
   var GH = [], ghF = [-1, -1];
   function ghostSnap(G, i, mats, rig, col) {
@@ -2563,7 +2617,11 @@ var GFX = (function () {
     var W = cv.width, Hh = cv.height, asp = W / Hh;
     /* camera: elevated side view framing both fighters across x and z; cine zoom to the caster */
     var a = G.P[0], b = G.P[1], midx = (a.x + b.x) / 2, midz = (a.z + b.z) / 2, spread = Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z) * 1.6);
-    var tx = midx, tz = midz * 0.6, td = Math.max(10, Math.min(19, 8.5 + spread * 0.8)) * (asp < 1.5 ? 1.2 : 1), ty = 0.6 + Math.max(a.y, b.y) * 0.3;
+    /* a launched fighter lifts the camera and widens the shot a little so the arc stays in frame */
+    var hy = Math.max(a.y, b.y), tx = midx, tz = midz * 0.6, td = (Math.max(10, Math.min(19, 8.5 + spread * 0.8)) + hy * 0.95) * (asp < 1.5 ? 1.2 : 1), ty = 0.6 + hy * 0.6;
+    /* skill camera: a push in and a lead along the move (further for dashes; a lift for rising moves) */
+    var ck = camCast();
+    if (ck) { var cf = G.P[ck.p]; tx += cf.dx * ck.lead * ck.k; tz += cf.dz * ck.lead * ck.k * 0.6; td *= 1 - ck.push * ck.k; ty += ck.lift * ck.k * Math.min(2.5, cf.y); }
     if (G.cine > 0 && G.cineP >= 0) { var cp = G.P[G.cineP]; tx = cp.x + cp.dx * 0.5; tz = cp.z + cp.dz * 0.5; td = 6; ty = 0.9; }
     if (st && st.koZoom) { tx = st.koX; tz = st.koZ || 0; td = 8; }
     var lim = Math.max(0, 19 - td * asp * 0.3); tx = Math.max(-lim, Math.min(lim, tx));
@@ -2574,10 +2632,14 @@ var GFX = (function () {
     var cssH = Hh / ((typeof devicePixelRatio !== 'undefined' && devicePixelRatio) || 1), wpp = 2 * cam.d * 1.09 * Math.tan(17 * D2R) / Math.max(1, cssH);
     WPP = wpp;
     /* camera push from a chain catch, decaying */
-    kickC[0] *= 0.82; kickC[1] *= 0.82; kickC[2] *= 0.82;
+    var nowC = performance.now() / 1000; camDT = Math.min(0.1, Math.max(0, nowC - (camLT || nowC))); camLT = nowC;
+    var kd = Math.exp(-camDT / 0.07); kickC[0] *= kd; kickC[1] *= kd; kickC[2] *= kd;
     var spx = OPT.rm ? 0 : 11 * G.shake, sa = Math.random() * Math.PI * 2, sx = Math.cos(sa) * spx * wpp, sy = Math.sin(sa) * spx * wpp;
     sx += kickC[0] * wpp; sy += kickC[1] * wpp;
-    camE = [cam.x + sx, cam.y + cam.d * 0.42 + sy, cam.z + cam.d]; camT = [cam.x + sx, cam.y + sy, cam.z - 0.8];
+    /* hit punch: a fast push toward the impact that springs back (not smoothed like the follow camera) */
+    punchK = pulseVal(PUN, 0.12); impK = pulseVal(IMP, 0.2);
+    var dE = cam.d * (1 - punchK), io = [(impP[0] - cam.x) * impK, (impP[1] - cam.y) * impK * 0.5, (impP[2] - cam.z) * impK * 0.5];
+    camE = [cam.x + sx + io[0], cam.y + dE * 0.42 + sy + io[1], cam.z + dE + io[2]]; camT = [cam.x + sx + io[0], cam.y + sy + io[1], cam.z - 0.8 + io[2]];
     var fovC = 34; CSV = csView(G, time);
     if (CSV) { camE = CSV.e; camT = CSV.t; fovC = CSV.fov; var cdd = Math.sqrt((camT[0] - camE[0]) * (camT[0] - camE[0]) + (camT[1] - camE[1]) * (camT[1] - camE[1]) + (camT[2] - camE[2]) * (camT[2] - camE[2])); WPP = 2 * cdd * Math.tan(fovC / 2 * D2R) / Math.max(1, cssH); }
     /* inspection camera for tools (opts.cam = { e, t, fov }); never set by the game */
@@ -2720,6 +2782,7 @@ var GFX = (function () {
       gl.uniform1f(progW.u.uP, Math.max(3, Math.round(Hh / 160))); gl.uniform2f(progW.u.uRes, W, Hh); fullQuad(progW);
       gl.useProgram(progA.p); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
+    if (!CSV) drawLines(W, Hh); else { LINES = []; whiteF = 0; PUN = IMP = null; }
     if (CSV && CSV.over) { gl.uniformMatrix4fv(progA.u.uVP, false, m4()); drawA(CSV.over); }
     var meI = OPT.me == null ? -1 : OPT.me;
     if (meI >= 0 && G.P[meI] && G.P[meI].st === 'void') {
@@ -3129,7 +3192,7 @@ var GFX = (function () {
       if (f.mv === 'A6' && m) {
         var mt = f.mt, held = f.held >= 0 && o.st === 'held', head = null, a6 = m.h[0];
         if (held) head = [o.x, o.y + 1.1, o.z];
-        else if (mt >= a6.at - 1 && mt < a6.at + a6.len + 6) { var ext = mt < a6.at + a6.len ? Math.min(1, (mt - a6.at + 2) / (a6.len - 1)) : Math.max(0, 1 - (mt - a6.at - a6.len) / 6); head = [hand[0] + f.dx * 4 * ext, hand[1] - 0.1 * ext, hand[2] + f.dz * 4 * ext]; }
+        else if (!m.thru && mt >= a6.at - 1 && mt < a6.at + a6.len + 6) { var ext = mt < a6.at + a6.len ? Math.min(1, (mt - a6.at + 2) / (a6.len - 1)) : Math.max(0, 1 - (mt - a6.at - a6.len) / 6); head = [hand[0] + f.dx * 4 * ext, hand[1] - 0.1 * ext, hand[2] + f.dz * 4 * ext]; }
         if (head) {
           var cx = head[0] - hand[0], cy = head[1] - hand[1], cz = head[2] - hand[2], cl = Math.sqrt(cx * cx + cy * cy + cz * cz), step = 5 * WPP, nB = Math.max(1, Math.floor(cl / step));
           for (var b = 0; b < nB; b++) { var u = b / nB, wob = Math.sin(time * 30 + b) * 0.03 * (held ? 0.3 : 1); sq(al, hand[0] + cx * u, hand[1] + cy * u + wob, hand[2] + cz * u, 1.4 * WPP, (b % 3 === 0 ? EC.pink : b & 1 ? EC.dark : EC.purple).concat([1])); }
@@ -3721,7 +3784,9 @@ var GFX = (function () {
           if (e.k === 'pillar') { addFx({ k: 'pillar', x: e.x, y: 0, z: e.z }, 46, cc); flashLight = 0.6; }
           break;
         }
+        case 'swing': camSwing(G, FSm0, e); break;
         case 'hit': {
+          if (!CSV) camHit(G, e);
           var icol = G.P[1 - e.p] ? charCol(G.P[1 - e.p].c) : [1, 1, 1]; if (G.P[1 - e.p] && G.P[1 - e.p].c === 'mo') icol = EC.mag;
           EFX.push({ k: 'imp', t: 0, life: e.pw >= 6 ? 10 : 7, x: e.x, y: e.y, z: e.z || 0, r: e.pw >= 6 ? 1.1 : 0.7, c: icol, rot: Math.random() * 3 });
           if (G.P[1 - e.p] && G.P[1 - e.p].c === 'mo') {
@@ -3750,6 +3815,9 @@ var GFX = (function () {
             addFx({ k: 'impact', x: e.x, y: e.y + 0.3, z: e.z || 0, r: e.small ? 1.0 : 2.2, rot: Math.random() * 3 }, e.small ? 10 : 16, [1, 0.9, 0.6]);
             if (e.small) break;
           }
+          /* explosions punch the camera too, scaled by size */
+          if (!CSV && !OPT.rm && e.k !== 'ender') { var bt = e.small ? 1 : e.big ? 4 : 3, ba = Math.random() * 6.283; kickC[0] += Math.cos(ba) * [0, 2, 0, 5, 9][bt]; kickC[1] += Math.sin(ba) * [0, 2, 0, 5, 9][bt]; PUN = pulseSet(PUN, [0, 0.012, 0, 0.04, 0.07][bt], 0.06);
+            if (bt >= 3) { impP = [e.x, e.y || 0.5, e.z || 0]; IMP = pulseSet(IMP, 0.15, 0.06); } if (bt === 4) LINES.push({ p: [e.x, e.y || 0.5, e.z || 0], t: 0, life: 0.26, n: 22, c: [1, 0.85, 0.6], s: Math.random() * 100 }); }
           if (e.k === 'blast') { burst(e.x, 0.3, e.z || 0, 26, [0.5, 0.36, 0.22], 0.22, 40, 0.2, 0.016, 0); burst(e.x, 0.2, e.z || 0, 14, [0.4, 0.62, 0.25], 0.18, 40, 0.16, 0.016, 0); }
           if (e.k === 'fire' && e.small) { burst(e.x, e.y, e.z || 0, 14, [1, 0.55, 0.15], 0.12, 18, 0.14, 0.002, 1); burst(e.x, e.y, e.z || 0, 6, [0.35, 0.33, 0.32], 0.05, 34, 0.22, -0.002, 0); break; }
           burst(e.x, e.y, e.z || 0, e.small ? 10 : e.big ? 36 : 24, [1, 0.6, 0.15], e.small ? 0.12 : 0.2, 26, 0.2, 0.004, 1);
@@ -3807,7 +3875,7 @@ var GFX = (function () {
   }
 
   return { init: init, render: render, events: events, project: project, portrait: portrait, STAGES: STAGES, SK: SK,
-    resize: function (w, h) { cv.width = w; cv.height = h; }, clearFx: function () { PT = []; FXL = []; trails = [[], []]; yawS = [null, null]; poseS = [null, null]; GH = []; ghF = [-1, -1]; zoomK = 0; EFX = []; for (var k = 0; k < EMAX; k++) EPOOL[k].on = 0; EN = 0; }, opts: OPT };
+    resize: function (w, h) { cv.width = w; cv.height = h; }, clearFx: function () { PT = []; FXL = []; trails = [[], []]; yawS = [null, null]; poseS = [null, null]; GH = []; ghF = [-1, -1]; zoomK = 0; EFX = []; for (var k = 0; k < EMAX; k++) EPOOL[k].on = 0; EN = 0; }, opts: OPT, _cam: function () { return { lines: LINES.length, punch: punchK, imp: impK, cast: !!castCam }; } };
 })();
 
 </script>
