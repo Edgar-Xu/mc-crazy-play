@@ -1,10 +1,11 @@
 {
- "v": "3.8.1",
- "apk": "https://github.com/Edgar-Xu/mc-crazy-play/releases/download/v3.8.1/MC-Crazy-3.8.1.apk",
+ "v": "3.8.2",
+ "apk": "https://github.com/Edgar-Xu/mc-crazy-play/releases/download/v3.8.2/MC-Crazy-3.8.2.apk",
  "size": "4.6 MB",
  "notes": [
-  "节奏调整为原版的 1.5 倍慢，一局 90 秒",
-  "修复所有角色缺小臂和小腿（悬空走路、隔空拿武器）",
-  "特写时长保持不变，完美虚化判定仍为 0.5 秒"
+  "虚化时技能和子技能可以随时打断普攻",
+  "黑焰凝视、龙爪拍脸改为扭曲转场进入末地空间演出，结束后扭回战场",
+  "完美虚化换成碎玻璃音效",
+  "修复大招期间被收容的人不按时吐出；大招没打到人时提前结束"
  ]
 }

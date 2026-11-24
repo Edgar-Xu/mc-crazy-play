@@ -236,7 +236,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
   <h3>胜负</h3>每回合 60 秒，三局两胜；超时按剩余血量百分比判定。
   <div class="row"><button class="btn gold" id="hClose">知道了</button></div></div></div>
 </div>
-<script>window.MC_APP={v:"3.8.1"};</script>
+<script>window.MC_APP={v:"3.8.2"};</script>
 <script>
 /* MC Crazy music: a small procedural tracker on Web Audio. All tracks are original compositions written for
    this project in a block-world mood (sparse piano, soft pads, a "choir" pad for dungeons, chip drums for
@@ -795,9 +795,11 @@ var FS = (function () {
      reach (within reach blocks of the caster) is checked. From flow on the target may substitute out.
      beats: named moments for sound and screen effects */
   var CS = {
-    gaze: { len: 135, flow: 100, hits: [[100, 150]], cls: 's', beats: [[1, 'eye'], [24, 'ignite'], [90, 'implode'], [100, 'burst']] },
-    claw: { len: 120, flow: 76, hits: [[76, 195]], cls: 'u', beats: [[1, 'tear'], [22, 'emerge'], [64, 'swing'], [76, 'slam'], [100, 'close']] },
+    /* gaze and claw: ticks 0-16 warp into the end space, the scene runs from 16, the last 26 warp back to the arena */
+    gaze: { len: 176, flow: 116, warp: 16, hits: [[116, 150]], cls: 's', beats: [[1, 'warpIn'], [17, 'eye'], [40, 'ignite'], [106, 'implode'], [116, 'burst'], [150, 'warpOut']] },
+    claw: { len: 154, flow: 92, warp: 16, hits: [[92, 195]], cls: 'u', beats: [[1, 'warpIn'], [17, 'tear'], [38, 'emerge'], [80, 'swing'], [92, 'slam'], [116, 'close'], [128, 'warpOut']] },
     dragon: { len: 290, flow: 170, free: 1, reach: AX, hits: [172, 181, 190, 199, 208, 217, 226, 235, 244, 253].map(function (t) { return [t, 31]; }), cls: 'u',
+      missTo: 230,
       beats: [[1, 'eye'], [34, 'flame'], [66, 'quake'], [100, 'burst'], [132, 'roar'], [166, 'breath'], [262, 'fade']] }
   };
   function startCs(G, f, k) {
@@ -817,6 +819,12 @@ var FS = (function () {
       G.ev.push({ t: 'csEnd', k: cs.k, p: cs.p, esc: 1 }); return;
     }
     if (d.free && cs.t < d.flow) { a.buf = {}; o.buf = {}; }
+    /* time runs again from flow: a target held in the end space by containment still comes out on time, and the
+       breath takes it from then on if it lands within reach */
+    if (d.free && cs.t >= d.flow && !cs.hit && o.st === 'void') {
+      voidTick(G, o, 1 - cs.p);
+      if (o.st !== 'void' && len2(o.x - a.x, o.z - a.z) <= d.reach && !o.ko) { o.inv = 0; cs.hit = 1; cs.ox = o.x; cs.oy = o.y; cs.oz = o.z; setSt(o, 'held'); o.vx = o.vy = o.vz = 0; }
+    }
     cs.acc = (cs.acc || 0) + CS_HZ; if (cs.acc < HZ) return; cs.acc -= HZ;
     cs.t++;
     if (cs.t === d.flow && !G.opt.train && G.timer > 1) G.timer--;
@@ -825,9 +833,9 @@ var FS = (function () {
     if (d.free && cs.t < d.flow) { a.buf = {}; o.buf = {}; }
     if (d.free && cs.t === d.flow) {
       var inR = len2(o.x - a.x, o.z - a.z) <= d.reach;
-      if (inR && phased(o)) { perfect(G, o); G.ev.push({ t: 'csMiss', p: cs.p }); }
+      if (inR && phased(o)) { perfect(G, o); G.ev.push({ t: 'csMiss', p: cs.p }); if (d.missTo) cs.t = d.missTo; }
       else if (inR && canHit(o, 1) && !pinv(o) && !o.ko) { cs.hit = 1; cs.ox = o.x; cs.oy = o.y; cs.oz = o.z; if (o.held >= 0) { var hv1 = G.P[o.held]; if (hv1.st === 'held') setSt(hv1, 'fall'); o.held = -1; } setSt(o, 'held'); o.vx = o.vy = o.vz = 0; }
-      else G.ev.push({ t: 'csMiss', p: cs.p });
+      else if (o.st !== 'void') { G.ev.push({ t: 'csMiss', p: cs.p }); if (d.missTo) cs.t = d.missTo; }
     }
     for (var k = 0; k < d.hits.length; k++) if (d.hits[k][0] === cs.t && cs.hit) {
       var last = k === d.hits.length - 1;
@@ -880,7 +888,8 @@ var FS = (function () {
     var sk = stickOf(hold);
     if (c.m.S1.charge) { f.arm = 0; if (f.ch <= 0) for (var an = 0; an < G.pj.length; an++) if (G.pj[an].k === 'tnt' && G.pj[an].o === i && G.pj[an].stuck) { f.arm = 1; break; } }
     if (f.c === 'mo' && f.buf.S2 > 0 && phaseable(f)) { f.buf.S2 = 0; phaseOn(G, f); }
-    if (f.c === 'mo' && f.phT > 0 && f.phN > 0 && (canAct(f) || (f.st === 'move' && moveOf(f, f.mv).sub && f.mt >= moveOf(f, f.mv).can) || f.st === 'summon')) {
+    var phNorm = f.c === 'mo' && f.phT > 0 && f.st === 'move' && !moveOf(f, f.mv).cls && f.held < 0 && !(moveOf(f, f.mv).noC != null && f.mt >= moveOf(f, f.mv).noC);
+    if (f.c === 'mo' && f.phT > 0 && f.phN > 0 && (canAct(f) || phNorm || (f.st === 'move' && moveOf(f, f.mv).sub && f.mt >= moveOf(f, f.mv).can) || f.st === 'summon')) {
       var xk = f.buf.X1 > 0 ? 'X1' : f.buf.X2 > 0 ? 'X2' : '';
       if (xk) { f.buf[xk] = 0; if (f.st === 'summon') setSt(f, 'idle'); startSub(G, f, xk); }
     }
@@ -915,7 +924,7 @@ var FS = (function () {
         break;
       case 'move': moveStep(G, f, o); break;
       case 'hit': f.vx *= 0.88; f.vz *= 0.88; if (--f.stun <= 0) { setSt(f, 'idle'); endCombo(f, o); } break;
-      case 'void': f.vx = f.vz = f.vy = 0; if (--f.voidT <= 0 && f.vT) { f.vT = 0; setSt(f, 'hit'); f.stun = 30; f.y = 0; G.ev.push({ t: 'voidOut', p: i, x: f.x, y: f.y, z: f.z, short: 1 }); } else if (f.voidT <= 0) { setSt(f, 'air'); f.y = Math.max(f.y, 0.6); f.vy = 0.3; f.stun = 50; f.kdl = 0; f.stop = 4; G.shake = Math.max(G.shake, 0.6); G.ev.push({ t: 'voidOut', p: i, x: f.x, y: f.y, z: f.z }); } break;
+      case 'void': voidTick(G, f, i); break;
       case 'bind': f.vx = f.vz = 0; if (f.y > 0) { f.vy -= GRAV * 1.6; f.y += f.vy; if (f.y <= 0) { f.y = 0; f.vy = 0; G.ev.push({ t: 'land', p: i }); } } else f.vy = 0; if (--f.bindT <= 0) { if (f.y > 0.05) { setSt(f, 'air'); f.stun = 20; f.kdl = 0; } else { setSt(f, 'hit'); f.stun = 16; } } break;
       case 'held': f.vx = f.vz = f.vy = 0; if (o.st !== 'move' || o.held !== i) { setSt(f, 'air'); f.vy = 0.05; } break;
       case 'air': if (f.stun > 0) f.stun--; break;
@@ -929,6 +938,12 @@ var FS = (function () {
       case 'roll': f.vx *= 0.96; f.vz *= 0.96; if (f.t >= 20) getUp(f, o); break;
     }
     physics(G, f);
+  }
+  /* held in the end space by containment: counts down, then comes out (short: a stagger; full: thrown into the air) */
+  function voidTick(G, f, i) {
+    f.vx = f.vz = f.vy = 0;
+    if (--f.voidT <= 0 && f.vT) { f.vT = 0; setSt(f, 'hit'); f.stun = 30; f.y = 0; G.ev.push({ t: 'voidOut', p: i, x: f.x, y: f.y, z: f.z, short: 1 }); }
+    else if (f.voidT <= 0) { setSt(f, 'air'); f.y = Math.max(f.y, 0.6); f.vy = 0.3; f.stun = 50; f.kdl = 0; f.stop = 4; G.shake = Math.max(G.shake, 0.6); G.ev.push({ t: 'voidOut', p: i, x: f.x, y: f.y, z: f.z }); }
   }
   function getUp(f, o) { setSt(f, 'idle'); f.inv = f.rise ? 36 : 8; f.rise = 0; endCombo(f, o); }
   /* phase can start from any own state except being hit, launched, knocked down or held */
@@ -1083,7 +1098,7 @@ var FS = (function () {
        a skill that hit may cancel into the other skill, the ultimate or a new normal string at its cancel
        point; skills are checked before the next normal so mashing attack never swallows a skill press */
     var firstAt = m.h && m.h.length ? m.h[0].at : (m.sp && m.sp.length ? m.sp[0].at : (m.can || m.len));
-    var skillOk = m.cls !== 'u' && !(m.noC != null && t >= m.noC) && (!m.cls ? t > firstAt : (f.hit && t >= (m.can || m.len)));
+    var skillOk = m.cls !== 'u' && !(m.noC != null && t >= m.noC) && (!m.cls ? t > firstAt || (f.c === 'mo' && f.phT > 0) : (f.hit && t >= (m.can || m.len)));
     if (skillOk) {
       if (f.buf.UL && f.en >= EN_MAX) { f.buf.UL = 0; f.held = -1; if (startMove(G, f, 'UL')) return; }
       var ks = !m.cls ? ['S1', 'S2'] : [f.mv === 'S1' ? 'S2' : 'S1'];
@@ -1542,7 +1557,7 @@ var FS = (function () {
    (16 texels per head face); stages are voxel meshes with per-vertex ambient occlusion. Render-only code,
    so trigonometry and Math.random are allowed here (the simulation never reads anything from this file). */
 var GFX = (function () {
-  var gl, cv, progL, progD, progA, progS, progT, progG, progB, progC, progF, dynT, fxTex, glowFb = null, atlas, actx, AW = 1024, shFbo, shTex, SHN = 1024, hasHi = false;
+  var gl, cv, progL, progD, progA, progS, progT, progG, progB, progC, progF, progW, dynT, fxTex, glowFb = null, atlas, actx, AW = 1024, shFbo, shTex, SHN = 1024, hasHi = false;
   var meshes = {}, stageMesh = null, curStage = -1, dyn, dynA, parts = [], trails = [[], []];
   /* ---------- math ---------- */
   function m4() { var m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; }
@@ -1614,6 +1629,17 @@ var GFX = (function () {
     'c+=vec3(.5,.12,.7)*step(.955,h(floor(q*38.)+floor(uT*9.)))*core;' +
     'float r=length((g-.5)*vec2(asp,1.))+(f-.6)*.3;a*=smoothstep(uR-.03,uR,r);c=mix(rim*1.25,c,smoothstep(uR,uR+.09,r));' +
     'gl_FragColor=vec4(c,a);}';
+  var FSW = 'precision mediump float;uniform float uT,uR,uH,uP;uniform vec2 uRes;varying vec2 vU;' +
+    'float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}' +
+    'float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1.,0.)),f.x),mix(h(i+vec2(0.,1.)),h(i+vec2(1.,1.)),f.x),f.y);}' +
+    'float fb(vec2 p){float s=0.,a=.5;for(int i=0;i<4;i++){s+=a*n(p);p*=2.03;a*=.5;}return s;}' +
+    'void main(){vec2 g=(floor(vU*uRes/uP)+.5)*uP/uRes;float asp=uRes.x/uRes.y;vec2 q=(g-.5)*vec2(asp,1.);float r=length(q),a=atan(q.y,q.x);' +
+    'float rr=r+(fb(vec2(a*2.5+3.,uT*1.5))-.5)*.18;float m=(1.-smoothstep(uR-.015,uR,rr))*smoothstep(uH-.015,uH,rr);' +
+    'float tw=a+1.7/(r+.25)+uT*.6;vec2 p=vec2(cos(tw),sin(tw))*r;' +
+    'float nb=fb(p*3.2+vec2(uT*.08,0.));vec3 c=mix(vec3(.012,.0,.03),vec3(.22,.05,.36),smoothstep(.35,.85,nb));c+=vec3(.28,.07,.45)*smoothstep(.68,.95,fb(p*6.-uT*.1));' +
+    'c+=vec3(.9,.82,1.)*step(.986,h(floor(p*70.)));' +
+    'float e=exp(-abs(rr-uR)*40.)*step(uH,rr)*step(uR,1.45)+(uH>0.?exp(-abs(rr-uH)*40.)*step(rr,uR):0.);c+=vec3(1.,.45,.95)*e*1.5;' +
+    'gl_FragColor=vec4(c,max(m,min(1.,e)));}';
   var FSC = 'precision mediump float;uniform sampler2D uTex;uniform float uK;varying vec2 vU;void main(){vec4 c=texture2D(uTex,vU);gl_FragColor=vec4(c.rgb*uK,1.);}';
   function compile(vs, fs) {
     function sh(t, s) { var o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; }
@@ -1719,6 +1745,8 @@ var GFX = (function () {
   function vxColour(p, n, rg, x, y, z) {
     var h = hash(x * 7 + z * 3, y * 5 + z * 11, 77), k = 0.88 + h * 0.24;
     if (rg === 5) return [1, 0.9, 1, 2.6];
+    if (rg === 9) { if (h < 0.03) return [0.7, 0.35, 0.95, 0.9]; var tk = h < 0.3 ? 0.8 : 1; return [0.47 * tk * k, 0.43 * tk * k, 0.57 * tk * k, 0]; }
+    if (rg === 10) { var st = (y + (x & 1)) % 3 === 0 ? 1.35 : 1; if (h < 0.025) return [0.55, 0.2, 0.85, 0.8]; return [0.1 * st * k, 0.07 * st * k, 0.16 * st * k, 0]; }
     if (rg === 4) return [0.9 * k, 0.86 * k, 0.95 * k, 0.05];
     if (rg === 6) return [0.45, 0.06, 0.32, 0.45];
     if (rg === 3 || rg === 7 || rg === 8) {
@@ -1787,6 +1815,15 @@ var GFX = (function () {
       return 0;
     };
   }
+  function vxIsleR(p) {
+    var x = p[0], y = p[1], z = p[2], r = Math.sqrt(x * x + z * z), a = Math.atan2(z, x);
+    if (Math.min(sdCap(p, [-0.62, -0.05, -0.6], [-0.8, 0.62, -0.78], 0.09, 0.015), sdCap(p, [-0.38, -0.05, -0.82], [-0.45, 0.38, -0.98], 0.06, 0.012), sdCap(p, [0.7, -0.05, -0.55], [0.92, 0.48, -0.72], 0.07, 0.012),
+      sdCap(p, [0.92, -0.3, 0.3], [1.22, -0.05, 0.42], 0.06, 0.012), sdCap(p, [0.05, -0.9, 0.05], [0.12, -1.55, 0.08], 0.09, 0.015)) < 0) return 3;
+    var rim = 1 + 0.1 * Math.sin(a * 5 + 1.3) + 0.06 * Math.sin(a * 11 + 0.4), nz = hash(Math.floor(x * 9 + 20), Math.floor(z * 9 + 20), 5) * 0.14;
+    var depth = 1.4 * Math.pow(Math.max(0, 1 - r / rim), 0.7) + 0.1 + nz;
+    if (r < rim && y <= 0 && y >= -depth) return y > -0.09 ? 9 : 10;
+    return 0;
+  }
   var vxReady = false;
   function vxEnsure() {
     if (vxReady || !gl) return vxReady; vxReady = true;
@@ -1794,6 +1831,7 @@ var GFX = (function () {
     meshes.vxJaw = voxMesh([-0.85, -0.9, -0.45, 0.85, 0.35, 3.1], 0.085, vxJawR, vxColour);
     meshes.vxSeg = voxMesh([-0.95, -0.65, -0.72, 0.95, 1.05, 0.72], 0.085, vxSegR, vxColour);
     meshes.vxClawR = voxMesh([-1.05, -2.75, -4.15, 1.25, 1.15, 2.05], 0.085, vxClawR(1), vxColour);
+    meshes.vxIsle = voxMesh([-1.3, -1.65, -1.3, 1.3, 0.7, 1.3], 0.055, vxIsleR, vxColour);
     meshes.vxClawL = voxMesh([-1.25, -2.75, -4.15, 1.05, 1.15, 2.05], 0.085, vxClawR(-1), vxColour);
     return true;
   }
@@ -2287,7 +2325,7 @@ var GFX = (function () {
     gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' }) || cv.getContext('experimental-webgl');
     if (!gl) return false;
     gl.getExtension('OES_element_index_uint');
-    progL = compile(VS, FSH); progD = compile(VSD, FSD); progA = compile(VSA, FSA); progS = compile(VSA, FSS); progT = compile(VST, FST); progG = compile(VSG, FSG); progB = compile(VSQ, FSB); progC = compile(VSQ, FSC); progF = compile(VSQ, FSF);
+    progL = compile(VS, FSH); progD = compile(VSD, FSD); progA = compile(VSA, FSA); progS = compile(VSA, FSS); progT = compile(VST, FST); progG = compile(VSG, FSG); progB = compile(VSQ, FSB); progC = compile(VSQ, FSC); progF = compile(VSQ, FSF); progW = compile(VSQ, FSW);
     dynT = gl.createBuffer(); fxTex = buildFxAtlas();
     var ac = document.createElement('canvas'); ac.width = ac.height = AW; actx = ac.getContext('2d');
     WHITE = tex(4, 4, fill(0xffffff, 0), 1);
@@ -2503,7 +2541,7 @@ var GFX = (function () {
     var u = prog.u, f = flashK || 0;
     gl.uniform3fv(u.uSun, L.sun); gl.uniform3f(u.uSunC, L.sunC[0] + f, L.sunC[1] + f * 0.8, L.sunC[2] + f * 0.5);
     gl.uniform3f(u.uSky, L.sky[0] * L.amb, L.sky[1] * L.amb, L.sky[2] * L.amb); gl.uniform3f(u.uGnd, L.gnd[0] * L.amb, L.gnd[1] * L.amb, L.gnd[2] * L.amb);
-    gl.uniform3fv(u.uFog, L.fog); gl.uniform2f(u.uFogR, CSV && CSV.k === 'dragon' ? 70 : 18, CSV && CSV.k === 'dragon' ? 160 : 46); gl.uniform1f(u.uShN, SHN);
+    gl.uniform3fv(u.uFog, L.fog); gl.uniform2f(u.uFogR, CSV && CSV.space ? 26 : CSV && CSV.k === 'dragon' ? 70 : 18, CSV && CSV.space ? 95 : CSV && CSV.k === 'dragon' ? 160 : 46); gl.uniform1f(u.uShN, SHN);
   }
   var shakeT = 0, flashLight = 0, dark = 0, zoomK = 0, OPT = { rm: false }, GS = 0.5;
   /* block afterimages: a snapshot of every part box each third simulation frame while dashing or blinking */
@@ -2675,6 +2713,11 @@ var GFX = (function () {
     if (CSV && CSV.flame) {
       gl.useProgram(progF.p); gl.uniform1f(progF.u.uT, time); gl.uniform1f(progF.u.uK, CSV.flame[0]); gl.uniform1f(progF.u.uR, CSV.flame[1]);
       gl.uniform1f(progF.u.uP, Math.max(3, Math.round(Hh / 150))); gl.uniform2f(progF.u.uRes, W, Hh); fullQuad(progF);
+      gl.useProgram(progA.p); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+    if (CSV && CSV.warp && CSV.warp[0] > CSV.warp[1] + 0.001) {
+      gl.useProgram(progW.p); gl.uniform1f(progW.u.uT, time); gl.uniform1f(progW.u.uR, CSV.warp[0]); gl.uniform1f(progW.u.uH, CSV.warp[1]);
+      gl.uniform1f(progW.u.uP, Math.max(3, Math.round(Hh / 160))); gl.uniform2f(progW.u.uRes, W, Hh); fullQuad(progW);
       gl.useProgram(progA.p); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
     if (CSV && CSV.over) { gl.uniformMatrix4fv(progA.u.uVP, false, m4()); drawA(CSV.over); }
@@ -3228,6 +3271,15 @@ var GFX = (function () {
 
   /* ---------- cinematics (黑焰凝视, 龙爪拍脸, 虚空龙爪). Display only: the simulation decides start and end ---------- */
   var CSV = null, csFrz = null;
+  /* warp mask [cover radius, hole radius]: covers from the centre, then opens a hole on the other side */
+  function warpMask(T, W, L) {
+    if (!W) return null;
+    if (T < W - 2) return [sm(T / (W - 4)) * 1.5, 0];
+    if (T < W + 12) return [1.5, sm((T - (W - 2)) / 12) * 1.5];
+    if (T >= L - 26 && T < L - 12) return [sm((T - (L - 26)) / 12) * 1.5, 0];
+    if (T >= L - 12) return [1.5, sm((T - (L - 12)) / 11) * 1.5];
+    return null;
+  }
   function lerp3(a, b, k) { return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]; }
   function L0top() { return (curL || LIGHT[0]).top; } function L0fog() { return (curL || LIGHT[0]).fog; }
   function add3(a, b, k) { return [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k]; }
@@ -3241,8 +3293,10 @@ var GFX = (function () {
     var shk = function (k) { return [(Math.random() - 0.5) * k, (Math.random() - 0.5) * k, 0]; };
     if (cs.k === 'gaze' || cs.k === 'claw') {
       /* every shot keeps both bodies whole: blocky characters do not survive extreme close-ups */
-      var X = csAxes(G), A0 = [a.x, a.y, a.z], O0 = [o.x, o.y, o.z], up = [0, 1, 0], e, tg, fov, sk = 0;
-      v.space = 0; v.view = 't'; v.sky = [[0.18, 0.06, 0.3], [0.06, 0.02, 0.1]]; v.amb = [0.24, 0.12, 0.34]; v.dm = 0.35;
+      var X = csAxes(G), A0 = [a.x, a.y, a.z], O0 = [o.x, o.y, o.z], up = [0, 1, 0], e, tg, fov, sk = 0, gE0 = camE.slice(), gT0 = camT.slice();
+      var CSd = FSm0.CS[cs.k], WL = CSd.warp || 0, LL = CSd.len, T0 = t, inEnd = T0 >= WL - 2 && T0 < LL - 12;
+      t = Math.max(0, T0 - WL);
+      v.space = 1; v.view = 't'; v.sky = [[0.05, 0.015, 0.1], [0.01, 0, 0.03]]; v.amb = [0.26, 0.14, 0.4]; v.dm = 0.45;
       if (cs.k === 'gaze') {
         /* 黑焰凝视: 0 mo's eyes flare; 24 over his shoulder the black flames take the target's feet; 60 low orbit as they
            climb and swallow it; 92 they collapse inward; 100 a pillar of black fire bursts (the hit); 135 end */
@@ -3274,6 +3328,15 @@ var GFX = (function () {
       }
       if (sk && !OPT.rm) { var jq = shk(sk); e = [e[0] + jq[0], e[1] + jq[1], e[2]]; }
       v.e = e; v.t = tg; v.fov = fov;
+      v.warp = warpMask(T0, WL, LL); v.tt = t;
+      if (!inEnd) {
+        /* in the arena: the play camera eases in on the pair while the warp swallows the view; afterwards it is the play camera */
+        var kq = T0 < WL ? sm(T0 / 14) * 0.5 : 0; v.space = 0; v.sky = null; v.amb = null; v.dm = null;
+        v.e = lerp3(gE0, add3(add3(X.mid, X.s, 4.5), up, 1.6), kq); v.t = lerp3(gT0, add3(X.mid, up, 1.0), kq); v.fov = 34 + kq * 12;
+        v.lb = T0 < WL ? Math.min(1, T0 / 5) : Math.max(0, (LL - T0) / 12);
+        if (T0 >= LL - 12) { v.pose[cs.p] = null; v.pose[1 - cs.p] = P_({ body: [-60, 0, 0], head: [-30, 0, 0], aR: [-150, 0, 40], aL: [-150, 0, -40], lR: [-30, 0, 0], lL: [-5, 0, 0], dy: 0.3 }); }
+        else if (cs.k === 'gaze') v.pose[1 - cs.p] = P_({ body: [-14, 0, 0], head: [-28, 0, 0], aR: [-120, 0, 30], aL: [-120, 0, -30], eR: [-70, 0, 0], eL: [-70, 0, 0], dy: 0.32 });
+      }
     } else {
       /* 虚空龙爪: see dragonPlan for the timeline. Every shot is framed in the arena itself */
       var D = dragonPlan(G, t, time), e, tg, fov, sk = 0, gE = camE.slice(), gT = camT.slice();
@@ -3335,7 +3398,7 @@ var GFX = (function () {
     D.rocks = D.rocks.filter(function (r) {
       r.age += dt; r.vy -= 0.016 * dt; r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt; r.rx += r.wx * dt; r.ry += r.wy * dt;
       if (r.y < r.s * 0.5) { r.y = r.s * 0.5; r.vy = Math.abs(r.vy) > 0.05 ? -r.vy * 0.25 : 0; r.vx *= 0.5; r.vz *= 0.5; r.wx *= 0.5; r.wy *= 0.5; }
-      q(r.g ? meshes.log : meshes.rock, mul(tr(r.x, r.y, r.z), mul(ry(r.ry), mul(rx(r.rx), sc(r.s, r.s, r.s)))), [0.12, 0.04, 0.2, 0.35], 0, dis || 0);
+      q(r.g && !(CSV && CSV.space) ? meshes.log : meshes.rock, mul(tr(r.x, r.y, r.z), mul(ry(r.ry), mul(rx(r.rx), sc(r.s, r.s, r.s)))), [0.12, 0.04, 0.2, 0.35], 0, dis || 0);
       return r.age < 260;
     });
   }
@@ -3476,6 +3539,8 @@ var GFX = (function () {
     var cs = G.cs, t = cs._ft != null ? cs._ft : cs.t, a = G.P[cs.p], o = G.P[1 - cs.p]; DR = null;
     if (cs.k === 'gaze' || cs.k === 'claw') {
       var Cx = csxState(G, time), dtc = Math.min(3, Math.max(0, (time - Cx.lt) * 60)) * GS; Cx.lt = time;
+      t = CSV.tt != null ? CSV.tt : t;
+      if (CSV.space && vxEnsure()) endSpace(G, time); else if (cs.t > 30) { Cx.rocks = []; Cx.cracks = null; }
       if (cs.k === 'claw' && vxEnsure() && t > 20 && t < 112) { var cp = clawPath(G, t), CM = clawM(cp.W, cp.F, cp.d, 1.25); q(meshes.vxClawR, CM, null, 0, t > 104 ? Math.min(0.97, (t - 104) / 8) : 0); Cx.M = CM; } else Cx.M = null;
       stepRocks(Cx, dtc, 0);
     }
@@ -3492,14 +3557,32 @@ var GFX = (function () {
   function csFx(G, time, EF, W, Hh) {
     var cs = G.cs, t = cs.t, a = G.P[cs.p], o = G.P[1 - cs.p], v = CSV, over = [];
     var black = function (al) { triA(over, [-1, -1, 0], [1, -1, 0], [1, 1, 0], [0, 0, 0, al], [0, 0, 0, al], [0, 0, 0, al]); triA(over, [-1, -1, 0], [1, 1, 0], [-1, 1, 0], [0, 0, 0, al], [0, 0, 0, al], [0, 0, 0, al]); };
-    if (cs.k === 'gaze') gazeFx(G, t, time, EF, over);
-    if (cs.k === 'claw') clawFx(G, t, time, EF, over);
+    if ((cs.k === 'gaze' || cs.k === 'claw') && v.space) { endSky(G, time, EF); if (cs.k === 'gaze') gazeFx(G, v.tt, time, EF, over); else clawFx(G, v.tt, time, EF, over); }
+    if ((cs.k === 'gaze' || cs.k === 'claw') && !v.space && cs.t < 20) {
+      /* the warp starts in the arena: motes spiral into both fighters */
+      for (var wi2 = 0; wi2 < 2; wi2++) { var wf = G.P[wi2]; epEmit('suck', wf.x, wf.y + 1, wf.z, Math.round(6 * EQ), { r: 1.8, px: 3, tx: wf.x, ty: wf.y + 1, tz: wf.z }); }
+    }
     if (cs.k === 'dragon' && DR) dragonFx(G, DR, t, time, EF, over, black);
     if (v.lb > 0) { var lh = 0.24 * v.lb, bc = [0, 0, 0, 1]; triA(over, [-1, 1 - lh, 0], [1, 1 - lh, 0], [1, 1, 0], bc, bc, bc); triA(over, [-1, 1 - lh, 0], [1, 1, 0], [-1, 1, 0], bc, bc, bc); triA(over, [-1, -1, 0], [1, -1, 0], [1, -1 + lh, 0], bc, bc, bc); triA(over, [-1, -1, 0], [1, -1 + lh, 0], [-1, -1 + lh, 0], bc, bc, bc); }
     v.over = over.length ? over : null;
   }
   var q2Late = [];
   function quadCam(v, c, w, h, col) { var A = add3(add3(c, camR, -w), camU, -h), B = add3(add3(c, camR, w), camU, -h), C = add3(add3(c, camR, w), camU, h), Dd = add3(add3(c, camR, -w), camU, h); triA(v, A, B, C, col, col, col); triA(v, A, C, Dd, col, col, col); }
+  /* the end space: a floating island under the pair, others drifting far off, a nebula, a dead violet star */
+  var ISLES = [[-14, 3, -18, 2.4], [12, -2.5, -22, 3.2], [-6, 7, -30, 1.8], [21, 6, -34, 2.6], [-23, -5, -26, 3.6], [7, -7, -13, 1.4], [-12, -4, 9, 1.3], [17, 2, 7, 1.5], [2, 11, -48, 5], [-30, 9, -40, 3], [30, -9, -30, 4]];
+  function endSpace(G, time) {
+    var X = csAxes(G);
+    q(meshes.vxIsle, mul(tr(X.mid[0], 0, X.mid[2]), mul(ry(0.4), sc(5.4, 5.4, 5.4))));
+    ISLES.forEach(function (I, k) { var b = Math.sin(time * 0.35 + k * 1.7) * 0.4, rot = time * 0.04 * (k & 1 ? 1 : -1) + k;
+      q(meshes.vxIsle, mul(tr(X.mid[0] + I[0], I[1] + b, X.mid[2] + I[2]), mul(ry(rot), mul(rx(Math.sin(k) * 0.12), sc(I[3], I[3], I[3]))))); });
+  }
+  function endSky(G, time, EF) {
+    var X = csAxes(G), cx = X.mid[0], cz = X.mid[2];
+    spr(TA, cx - 18, 14, cz - 70, 26, FXG, [0.55, 0.3, 0.85, 0.35], 0); spr(TA, cx - 18, 14, cz - 70, 7, FXG, [0.95, 0.85, 1, 0.6], 0);
+    spr(TA, cx - 18, 14, cz - 70, 22, FXRING, [0.7, 0.4, 1, 0.25], 0);
+    for (var k = 0; k < 7; k++) { var a = k * 0.9 + time * 0.01; spr(TA, cx + Math.cos(a) * 40, 4 + Math.sin(k * 2.3) * 12, cz - 50 + Math.sin(a) * 15, 22 + (k % 3) * 8, FXSMOKE, (k % 2 ? [0.3, 0.08, 0.45] : [0.08, 0.15, 0.35]).concat([0.25]), a); }
+    if (Math.random() < 0.7) epEmit('float', cx + (Math.random() - 0.5) * 10, -1 + Math.random() * 4, cz + (Math.random() - 0.5) * 6, 1, { px: 2.5, c0: Math.random() < 0.5 ? EC.mag : EC.hi });
+  }
   function flashOver(over, al) { var fc = [0.88, 0.66, 1, al]; triA(over, [-1, -1, 0], [1, -1, 0], [1, 1, 0], fc, fc, fc); triA(over, [-1, -1, 0], [1, 1, 0], [-1, 1, 0], fc, fc, fc); }
   function moEyes(EF, i, op, time) {
     if (!lastMats[i] || op <= 0) return; var HMx = lastMats[i][2];
@@ -3779,7 +3862,13 @@ var SFX = (function () {
     click: function (t) { tone('square', 660, 660, t, 0.03, 0.08); },
     /* ender: low tones repeated quieter as an echo, glassy partials on top */
     ehum: function (t) { for (var e = 0; e < 3; e++) tone('sine', 78, 52, t + e * 0.14, 0.7, 0.4 / (e + 1)); tone('sine', 41, 41, t, 1.8, 0.16); },
-    eglass: function (t) { [2630, 3310, 4170, 5230].forEach(function (f, k) { tone('triangle', f, f * 0.97, t + k * 0.012, 0.22, 0.12); }); noise(t, 0.12, 0.3, 'highpass', 4200); tone('sine', 72, 34, t + 0.09, 0.35, 0.8); tone('sine', 72, 34, t + 0.25, 0.3, 0.25); },
+    /* perfect phase: a pane of glass shattering, loud and abrupt. A hard crack, a bright burst of noise, a few dozen
+       shard pings scattered over 0.6 s (denser at the start), a low thump under it */
+    eglass: function (t) {
+      noise(t, 0.03, 1.0, 'highpass', 2500); noise(t, 0.35, 0.85, 'bandpass', 6000, 2400, 0.7); noise(t + 0.01, 0.6, 0.35, 'highpass', 7000);
+      for (var k = 0; k < 28; k++) { var dl = Math.pow(Math.random(), 1.8) * 0.6, fq = 2200 + Math.random() * 6500; tone(Math.random() < 0.5 ? 'triangle' : 'sine', fq, fq * (0.97 + Math.random() * 0.03), t + 0.015 + dl, 0.04 + Math.random() * 0.09, 0.24 * (1 - dl)); }
+      tone('sine', 140, 50, t, 0.22, 0.95);
+    },
     ewhoosh: function (t) { noise(t, 0.13, 0.32, 'bandpass', 1200, 4200, 1.1); tone('sine', 1500, 3000, t, 0.06, 0.05); },
     esuck: function (t) { noise(t, 0.5, 0.35, 'bandpass', 260, 2600, 1.4); tone('sine', 180, 720, t, 0.5, 0.14); },
     eboom: function (t) { for (var e = 0; e < 2; e++) tone('sine', 62, 26, t + e * 0.16, 0.6, 0.9 / (e + 1)); noise(t, 0.6, 0.7, 'lowpass', 1400, 90); [1900, 2850].forEach(function (f) { tone('triangle', f, f * 0.9, t, 0.18, 0.08); }); },
@@ -3805,7 +3894,7 @@ var SFX = (function () {
         case 'jump': play('jump'); break; case 'land': play('land', e.big); break; case 'dash': case 'roll': play('dash'); break;
         case 'ult': play('ult'); break; case 'assist': play('assist'); break; case 'ko': play('ko'); break;
         case 'phase': play('ehum'); break; case 'perfect': play('eglass'); break; case 'feint': play('ewhoosh'); break;
-        case 'csBeat': play({ eye: 'csEye', flame: 'csFlame', quake: 'csQuake', burst: 'csBurst', roar: 'csRoar', breath: 'csBreath', fade: 'csFade', ignite: 'csFlame', implode: 'esuck', tear: 'eglass', emerge: 'csQuake', swing: 'ewhoosh', slam: 'csBurst', close: 'csFade' }[e.b]); break;
+        case 'csBeat': play({ eye: 'csEye', flame: 'csFlame', quake: 'csQuake', burst: 'csBurst', roar: 'csRoar', breath: 'csBreath', fade: 'csFade', ignite: 'csFlame', implode: 'esuck', tear: 'ewhoosh', warpIn: 'esuck', warpOut: 'esuck', emerge: 'csQuake', swing: 'ewhoosh', slam: 'csBurst', close: 'csFade' }[e.b]); break;
         case 'voidIn': play('esuck'); break; case 'voidOut': case 'rcol': play('eboom'); break; case 'catch': case 'bind': play('ecrys'); break;
         case 'round': play('round'); break; case 'fight': play('fight'); break; case 'protect': play('protect'); break; case 'clash': play('clash'); break;
       }
