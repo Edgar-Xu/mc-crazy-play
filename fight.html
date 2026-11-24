@@ -236,7 +236,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
   <h3>胜负</h3>每回合 60 秒，三局两胜；超时按剩余血量百分比判定。
   <div class="row"><button class="btn gold" id="hClose">知道了</button></div></div></div>
 </div>
-<script>window.MC_APP={v:"3.8.0"};</script>
+<script>window.MC_APP={v:"3.8.1"};</script>
 <script>
 /* MC Crazy music: a small procedural tracker on Web Audio. All tracks are original compositions written for
    this project in a block-world mood (sparse piano, soft pads, a "choir" pad for dungeons, chip drums for
@@ -461,8 +461,8 @@ var MUSIC = (function () {
 
 </script>
 <script>
-/* Block Brawl simulation v2. Fixed HZ = 30 ticks per second (all frame counts below are ticks; the game ran at 60
-   before 3.8, so every timing now lasts twice as long in real time), deterministic: + - * / and Math.sqrt only (correctly rounded),
+/* Block Brawl simulation v2. Fixed HZ = 40 ticks per second (all frame counts below are ticks; the game ran at 60
+   before 3.8, so every timing now lasts 1.5 times as long in real time; cinematics keep their own 30 per second), deterministic: + - * / and Math.sqrt only (correctly rounded),
    no trig, no Math.random, no Date; randomness from seeded LCGs in G. Units: blocks and frames.
    The arena is a rectangle in x (left-right) and z (depth, +z toward the camera); y is up.
    Body states follow the mobile-brawler hierarchy: gk (unflinching, damage reduced) > bt (super armour,
@@ -476,9 +476,9 @@ var MUSIC = (function () {
    victim gets up quickly with invulnerability. Substitution gives 2 s of invulnerability and speed. State is plain JSON; G.ev lists the events of the last step for render/audio. */
 var FS = (function () {
   var K = { L: 1, R: 2, U: 4, D: 8, A: 16, S1: 32, S2: 64, UL: 128, B: 512, H: 1024, X1: 2048, X2: 4096 };
-  var HZ = 30, AX = 15, AZ = 4.5, GRAV = 0.016, FPR = 60 * HZ, BUF = 10;
+  var HZ = 40, CS_HZ = 30, AX = 15, AZ = 4.5, GRAV = 0.016, FPR = 90 * HZ, BUF = 10;
   /* perfect phase only counts an attack that arrives within PERF_W ticks (0.5 s) of pressing phase */
-  var PERF_W = 15;
+  var PERF_W = Math.round(HZ * 0.5);
   /* hit stop is a feel effect, kept near its old real duration: tick counts are scaled by STOP_K */
   var STOP_K = 0.6;
   var PH_N = 120, PH_P = 300, PH_CD = 720, PH_REF = 60, PERF_STOP = 9, SUB_DEC = 8, CW_T = 30, VOID_T = 90, RIFT_W = 90, BIND_T = 120, SET_GAP = 30, PK_T = 60, TNT_R = 4.5, GOLEM_R = 4.5, S2_BUFF = 180, SUB_INV = 120, SUB_CD = 420, PR_DMG = 0.4, PR_T = 450, AS_CD = 1080, AS_FIRST = 480, EN_MAX = 4, EN_START = 2, HURT_R = 0.4;
@@ -770,7 +770,7 @@ var FS = (function () {
   /* ---------- main step ---------- */
   function step(G, inp) {
     G.ev = []; G.f++;
-    if (G.shake > 0) G.shake = Math.max(0, G.shake - 0.1);
+    if (G.shake > 0) G.shake = Math.max(0, G.shake - 3 / HZ);
     for (var i = 0; i < 2; i++) readInput(G.P[i], inp[i] || 0);
     if (G.phase === 'intro') { G.pt++; if (G.pt === 1) G.ev.push({ t: 'round', r: G.round }); if (G.pt === 35) G.ev.push({ t: 'fight' }); if (G.pt >= 40) { G.phase = 'fight'; G.pt = 0; } return; }
     if (G.phase === 'over') return;
@@ -803,15 +803,23 @@ var FS = (function () {
   function startCs(G, f, k) {
     var i = G.P.indexOf(f), o = G.P[1 - i];
     if (f.held >= 0) f.held = -1;
-    G.cs = { k: k, p: i, t: 0, ox: o.x, oy: o.y, oz: o.z, hit: CS[k].free ? 0 : 1 };
+    G.cs = { k: k, p: i, t: 0, f0: G.f, ox: o.x, oy: o.y, oz: o.z, hit: CS[k].free ? 0 : 1 };
     if (!CS[k].free) { setSt(o, 'held'); o.vx = o.vy = o.vz = 0; }
     setSt(f, 'cs'); f.vx = f.vy = f.vz = 0;
     G.ev.push({ t: 'cs', k: k, p: i });
   }
   function csStep(G) {
     var cs = G.cs, d = CS[cs.k], a = G.P[cs.p], o = G.P[1 - cs.p];
-    cs.t++;
     if (cs.t >= d.flow && !G.opt.train && G.timer > 1) G.timer--;
+    /* from the first damaging tick the target may substitute out (checked every tick; that ends the cinematic) */
+    if (d.free && cs.hit && cs.t >= d.flow && !o.ko && o.cd.B <= 0 && o.en >= 1 && take(o, 'B')) {
+      G.cs = null; setSt(o, 'air'); substitute(G, o, a); setSt(a, grounded(a) ? 'idle' : 'fall'); a.held = -1;
+      G.ev.push({ t: 'csEnd', k: cs.k, p: cs.p, esc: 1 }); return;
+    }
+    if (d.free && cs.t < d.flow) { a.buf = {}; o.buf = {}; }
+    cs.acc = (cs.acc || 0) + CS_HZ; if (cs.acc < HZ) return; cs.acc -= HZ;
+    cs.t++;
+    if (cs.t === d.flow && !G.opt.train && G.timer > 1) G.timer--;
     if (d.beats) for (var bt = 0; bt < d.beats.length; bt++) if (d.beats[bt][0] === cs.t) G.ev.push({ t: 'csBeat', k: cs.k, b: d.beats[bt][1], p: cs.p });
     /* presses during the time stop are dropped, not buffered */
     if (d.free && cs.t < d.flow) { a.buf = {}; o.buf = {}; }
@@ -820,11 +828,6 @@ var FS = (function () {
       if (inR && phased(o)) { perfect(G, o); G.ev.push({ t: 'csMiss', p: cs.p }); }
       else if (inR && canHit(o, 1) && !pinv(o) && !o.ko) { cs.hit = 1; cs.ox = o.x; cs.oy = o.y; cs.oz = o.z; if (o.held >= 0) { var hv1 = G.P[o.held]; if (hv1.st === 'held') setSt(hv1, 'fall'); o.held = -1; } setSt(o, 'held'); o.vx = o.vy = o.vz = 0; }
       else G.ev.push({ t: 'csMiss', p: cs.p });
-    }
-    /* from the first damaging tick the target may substitute out; that ends the cinematic */
-    if (d.free && cs.hit && cs.t >= d.flow && !o.ko && o.cd.B <= 0 && o.en >= 1 && take(o, 'B')) {
-      G.cs = null; setSt(o, 'air'); substitute(G, o, a); setSt(a, grounded(a) ? 'idle' : 'fall'); a.held = -1;
-      G.ev.push({ t: 'csEnd', k: cs.k, p: cs.p, esc: 1 }); return;
     }
     for (var k = 0; k < d.hits.length; k++) if (d.hits[k][0] === cs.t && cs.hit) {
       var last = k === d.hits.length - 1;
@@ -1526,7 +1529,7 @@ var FS = (function () {
   }
 
   return { K: K, C: C, ORDER: ORDER, AS: AS, AS_ORDER: AS_ORDER, AIL: AIL, AX: AX, AZ: AZ, SUB_CD: SUB_CD, AS_CD: AS_CD, EN_MAX: EN_MAX,
-    HZ: HZ, PERF_W: PERF_W, newMatch: newMatch, step: step, ai: ai, CS: CS, moveOf: moveOf, invul: invul, body: body,
+    HZ: HZ, CS_HZ: CS_HZ, PERF_W: PERF_W, newMatch: newMatch, step: step, ai: ai, CS: CS, moveOf: moveOf, invul: invul, body: body,
     /* internals for mechanism tests (tools/test-mo.js); not used by the game */
     _t: { startMove: startMove, hitCheck: hitCheck, projStep: projStep, proj: proj, pinv: pinv, setSt: setSt } };
 })();
@@ -1874,7 +1877,9 @@ var GFX = (function () {
       tex(bw, bh, function (a, b, c) { bodyPaint(a, b, c, 1); }), tex(bw, bh, function (a, b, c) { bodyPaint(a, b, c, 0); })];
     function limbP(top, bot, split, cuff) { return function (set, W, H) { for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) set(x, y, y < H * split ? top : bot); if (cuff != null) for (var x2c = 0; x2c < W; x2c++) set(x2c, Math.floor(H * split), cuff); }; }
     /* rows [y0, y0 + h) of a paint function laid out for full height Hf (all in skin pixels) */
-    function slice(w, Hf, y0, h, paint) { return tex(w * x2, h * x2, function (set, W) { paint(function (x, y, c, e) { y -= y0 * x2; if (y >= 0 && y < h * x2) set(x, y, c, e); }, W, Hf * x2); }); }
+    /* the offset and height are rounded to whole texels: a fractional row index writes nothing, which left the
+       forearm and shin textures fully transparent (and discarded by the shader) */
+    function slice(w, Hf, y0, h, paint) { var o0 = Math.round(y0 * x2), hh = Math.max(1, Math.round(h * x2)); return tex(w * x2, hh, function (set, W) { paint(function (x, y, c, e) { y -= o0; if (y >= 0 && y < hh) set(x, y, c, e); }, W, Hf * x2); }); }
     var armTop = id === 'fu' ? 0x9a9aa2 : s.shirt, armBot = id === 'mo' ? s.skin : (id === 'fu' ? s.skin : (id === 'lin' ? s.shirt2 : s.skin));
     /* limbs are cut at the elbow and knee; each half overlaps the other by OV pixels so a bent joint shows no gap */
     var OV = 1.2, AH = R.arm / 2, LH = R.leg / 2, armP = limbP(armTop, armBot, id === 'mo' ? 0.2 : 0.4, id === 'xiao' ? 0xf2f2f2 : id === 'fang' ? s.shirt2 : null), legP = limbP(s.pants, s.boots, 0.72, id === 'fang' ? 0x6a4a2a : null);
@@ -2537,6 +2542,8 @@ var GFX = (function () {
     camE = [cam.x + sx, cam.y + cam.d * 0.42 + sy, cam.z + cam.d]; camT = [cam.x + sx, cam.y + sy, cam.z - 0.8];
     var fovC = 34; CSV = csView(G, time);
     if (CSV) { camE = CSV.e; camT = CSV.t; fovC = CSV.fov; var cdd = Math.sqrt((camT[0] - camE[0]) * (camT[0] - camE[0]) + (camT[1] - camE[1]) * (camT[1] - camE[1]) + (camT[2] - camE[2]) * (camT[2] - camE[2])); WPP = 2 * cdd * Math.tan(fovC / 2 * D2R) / Math.max(1, cssH); }
+    /* inspection camera for tools (opts.cam = { e, t, fov }); never set by the game */
+    if (OPT.cam) { camE = OPT.cam.e; camT = OPT.cam.t; fovC = OPT.cam.fov || 30; }
     var V = look(camE, camT, [0, 1, 0]), Pm = persp(fovC * D2R, asp, 0.3, 160); VPm = mul(Pm, V); camR = [V[0], V[4], V[8]]; camU = [V[1], V[5], V[9]];
     var L = curL, lc = [cam.x + L.sun[0] * 30, L.sun[1] * 30, L.sun[2] * 30];
     Lm = mul(ortho(-26, 26, -18, 18, 1, 80), look(lc, [cam.x, 0, -2], [0, 1, 0]));
@@ -3308,7 +3315,7 @@ var GFX = (function () {
       v.pose[cs.p] = t < 66 ? P_({ head: [22 - 30 * lift, 0, 0], body: [6 - 6 * lift, 0, 0], aR: [-20, 0, 10], aL: [-20, 0, -10] })
         : P_({ aR: [-160, 0, 28], aL: [-160, 0, -28], eR: [-12, 0, 0], eL: [-12, 0, 0], body: [-12, 0, 0], head: [-26, 0, 0], lR: [-12, 0, 0], lL: [14, 0, 0] });
       /* the opponent is frozen by the time stop: the pose it had at the start; caught in the breath it writhes */
-      var fid = G.f - cs.t; if (!csFrz || csFrz.id !== fid) csFrz = { id: fid, p: poseS[1 - cs.p] ? JSON.parse(JSON.stringify(poseS[1 - cs.p])) : null };
+      var fid = cs.f0; if (!csFrz || csFrz.id !== fid) csFrz = { id: fid, p: poseS[1 - cs.p] ? JSON.parse(JSON.stringify(poseS[1 - cs.p])) : null };
       if (cs.hit && t >= 170) { var w1 = Math.sin(time * 34) * 10; v.pose[1 - cs.p] = P_({ body: [-28 + w1, 0, w1 * 0.5], head: [-34, 0, 0], aR: [-60, 0, 70 + w1], aL: [-60, 0, -70 - w1], eR: [-50, 0, 0], eL: [-50, 0, 0], lR: [-20, 0, 0], lL: [18, 0, 0], kR: [30, 0, 0], kL: [24, 0, 0] }); }
       else v.pose[1 - cs.p] = csFrz.p || P_({});
     }
@@ -3323,7 +3330,7 @@ var GFX = (function () {
   var DRP = null, HS = 2.3, CLS = 2.0, CSX = null;
   /* u: from the caster to the target; s: across, on the camera side of the arena */
   function csAxes(G) { var cs = G.cs, a = G.P[cs.p], o = G.P[1 - cs.p], dx = o.x - a.x, dz = o.z - a.z, l = Math.sqrt(dx * dx + dz * dz) || 1, u = [dx / l, 0, dz / l], s2 = [-u[2], 0, u[0]]; if (s2[2] < 0) s2 = [-s2[0], 0, -s2[2]]; return { u: u, s: s2, mid: [(a.x + o.x) / 2, 0, (a.z + o.z) / 2] }; }
-  function csxState(G, time) { var id = (G.f - G.cs.t) + G.cs.k; if (!CSX || CSX.id !== id) CSX = { id: id, rocks: [], flags: {}, lt: time, cracks: null, tips: null }; return CSX; }
+  function csxState(G, time) { var id = G.cs.f0 + G.cs.k; if (!CSX || CSX.id !== id) CSX = { id: id, rocks: [], flags: {}, lt: time, cracks: null, tips: null }; return CSX; }
   function stepRocks(D, dt, dis) {
     D.rocks = D.rocks.filter(function (r) {
       r.age += dt; r.vy -= 0.016 * dt; r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt; r.rx += r.wx * dt; r.ry += r.wy * dt;
@@ -3397,7 +3404,7 @@ var GFX = (function () {
     return { W: W, d: d, R: Rf, F: nrm(add3(add3(add3(Rf, X.u, 2.2), up, 0.6), W, -1)), open: sm(t / 16) * (1 - sm((t - 104) / 10)) };
   }
   function dragonPlan(G, t, time) {
-    var cs = G.cs, a = G.P[cs.p], o = G.P[1 - cs.p], id = G.f - cs.t;
+    var cs = G.cs, a = G.P[cs.p], o = G.P[1 - cs.p], id = cs.f0;
     if (!DRP || DRP.id !== id) DRP = { id: id, rocks: [], fires: [], flags: {}, lt: time, cracks: null, fT: -1 };
     var D = DRP, bx = Math.max(-8, Math.min(8, a.x)), B = [bx, 0, -9.5];
     D.B = B; D.mid = Math.max(-9, Math.min(9, (a.x + o.x) / 2)); D.t = t;
@@ -4399,7 +4406,7 @@ var BNET = (function () {
   function startMatch() {
     var opp = S.tower ? S.tower.list[S.tower.i] : S.c[1], boss = S.tower && S.tower.i === S.tower.list.length - 1;
     var asOpp = FS.AS_ORDER[(FS.AS_ORDER.indexOf(S.as) + 1 + (S.tower ? S.tower.i : 0)) % 3];
-    S.G = FS.newMatch({ c: [S.c[0], opp], as: [S.as, asOpp], stage: S.tower ? S.tower.i % 3 : S.stage, seed: (seedN++ * 7919 + (Date.now() % 100000)) % 2147483647, train: S.mode === 'train' ? 1 : 0, boss: boss ? 1 : 0, win: S.mode === 'train' ? 99 : 2, time: S.mode === 'train' ? 99 * 60 : 3600 });
+    S.G = FS.newMatch({ c: [S.c[0], opp], as: [S.as, asOpp], stage: S.tower ? S.tower.i % 3 : S.stage, seed: (seedN++ * 7919 + (Date.now() % 100000)) % 2147483647, train: S.mode === 'train' ? 1 : 0, boss: boss ? 1 : 0, win: S.mode === 'train' ? 99 : 2, time: (S.mode === 'train' ? 99 : 90) * FS.HZ });
     S.aiLv = S.tower ? (S.tower.i < 2 ? 1 : 2) : S.lv; S.me = 0; S.net = null;
     setupHud(S.G);
   }
@@ -4598,7 +4605,7 @@ var BNET = (function () {
      cinematic clock between the last two ticks, so motion stays smooth at the display rate. The state is put back
      right after drawing, so the simulation never sees interpolated values */
   var ipA = null, ipB = null, ipF = -1;
-  function ipSnap(G) { return { f: G.f, P: G.P.map(function (f) { return { x: f.x, y: f.y, z: f.z, mt: f.mt, t: f.t, mv: f.mv, st: f.st }; }), pj: G.pj.map(function (p) { return [p, p.x, p.y, p.z]; }), cs: G.cs ? G.cs.t : -1 }; }
+  function ipSnap(G) { return { f: G.f, P: G.P.map(function (f) { return { x: f.x, y: f.y, z: f.z, mt: f.mt, t: f.t, mv: f.mv, st: f.st }; }), pj: G.pj.map(function (p) { return [p, p.x, p.y, p.z]; }), cs: G.cs ? G.cs.t + (G.cs.acc || 0) / FS.HZ : -1 }; }
   function ipApply(G, al) {
     if (G.f !== ipF) { ipA = ipB && ipB.f === G.f - 1 ? ipB : null; ipB = ipSnap(G); ipF = G.f; }
     if (!ipA || !ipB || ipB.f !== G.f) return null;
@@ -4612,7 +4619,7 @@ var BNET = (function () {
     }
     var prev = new Map(); ipA.pj.forEach(function (q) { prev.set(q[0], q); });
     G.pj.forEach(function (p) { var q = prev.get(p); if (!q) return; keep.pj.push([p, p.x, p.y, p.z]); p.x = lerp(q[1], p.x); p.y = lerp(q[2], p.y); p.z = lerp(q[3], p.z); });
-    if (G.cs && ipA.cs === G.cs.t - 1) G.cs._ft = ipA.cs + al;
+    if (G.cs && ipA.cs >= 0) { var cn = G.cs.t + (G.cs.acc || 0) / FS.HZ; if (cn >= ipA.cs && cn - ipA.cs < 2) G.cs._ft = ipA.cs + (cn - ipA.cs) * al; }
     return keep;
   }
   function ipRestore(G, keep) {
